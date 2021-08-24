@@ -89,7 +89,7 @@ class InteractiveArgumentParser:
         self._prompter = prompter
         self._interactive_flag = interactive_flag.replace("--", "")
         self._enable_by_default = enable_by_default
-        self._init_interactive_parser()
+        # self._init_interactive_parser()
 
     # Proxy
     def __getattr__(self, attr):
@@ -140,8 +140,6 @@ class InteractiveArgumentParser:
         ]
         questions = list(filter(not_none, questions))
         answers = self._prompter(questions)
-        print(questions)
-        print(answers)
 
         if len(answers) == 0 and len(questions) > 0:
             # Cancelled by user
