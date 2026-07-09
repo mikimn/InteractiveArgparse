@@ -1,11 +1,8 @@
-import json
 import sys
-from argparse import ArgumentParser, Action, Namespace, SUPPRESS
+from argparse import ArgumentParser, Action, Namespace, SUPPRESS, _SubParsersAction
 from typing import Optional, Any, Callable, List
 
 from PyInquirer import prompt as pyinquierer_prompt
-
-_UNRECOGNIZED_ARGS_ATTR = '_unrecognized_args'
 
 
 def format_question(action_name: str, action_help: str, default=None):
@@ -22,14 +19,16 @@ def format_question(action_name: str, action_help: str, default=None):
 def _argparse_action_to_question(action: Action) -> Optional[dict]:
     if action.default == SUPPRESS:
         return None
+    if isinstance(action, _SubParsersAction):
+        # Subparsers expose `choices` as a dict of sub-parsers, which isn't a
+        # valid PyInquirer choice list. Not supported yet, so skip them.
+        return None
     guessed_type = type(action.default)
-    guessed_filter = None
     if action.default is None:
         if action.type in [int, str, bool, float]:
             guessed_type = action.type
-            guessed_filter = lambda x: guessed_type(x)
 
-    if action.nargs and (action.nargs == "+" or action.nargs.isnumeric() and int(action.nargs) > 1):
+    if action.nargs and (action.nargs == "+" or (isinstance(action.nargs, int) and action.nargs > 1)):
         q_type = "checkbox"
     elif (not action.nargs or action.nargs == 1) and action.choices is not None:
         q_type = "list"
@@ -46,26 +45,14 @@ def _argparse_action_to_question(action: Action) -> Optional[dict]:
         "message": format_question(action.dest, action.help, action.default),
     }
     if action.default is not None:
-        # result["default"] = str(action.default)
-        result["default"] = action.default
+        # PyInquirer's "input" prompt renders the default as text, so it must
+        # be a string; "list"/"checkbox"/"confirm" expect the raw value.
+        result["default"] = str(action.default) if q_type == "input" else action.default
     if not isinstance(None, guessed_type):
         result["filter"] = lambda x: guessed_type(x)
     if action.choices:
         result["choices"] = action.choices
     return result
-
-
-def _format_action_dict(action: Action):
-    return {
-        "strings": action.option_strings,
-        "name": action.dest,
-        "nargs": action.nargs,
-        "const": action.const,
-        "default": action.default,
-        "type": action.type.__name__ if action.type is not None else None,
-        "choices": action.choices,
-        "help": action.help
-    }
 
 
 def not_none(x: Optional[Any]):
@@ -81,7 +68,8 @@ class InteractiveArgumentParser:
             enable_by_default=True,
     ) -> None:
         super().__init__()
-        assert base_parser, "base_parser cannot be None"
+        if base_parser is None:
+            raise ValueError("base_parser cannot be None")
         self._base_parser = base_parser
         self._base_parser.parse_known_args = self.parse_known_args
         self._namespace = None
@@ -89,7 +77,9 @@ class InteractiveArgumentParser:
         self._prompter = prompter
         self._interactive_flag = interactive_flag.replace("--", "")
         self._enable_by_default = enable_by_default
-        # self._init_interactive_parser()
+        self._flag_dest = f"no_{self._interactive_flag}" if enable_by_default else self._interactive_flag
+        self._flag_option = f"--{self._flag_dest}"
+        self._init_interactive_parser()
 
     # Proxy
     def __getattr__(self, attr):
@@ -100,14 +90,21 @@ class InteractiveArgumentParser:
 
     def _init_interactive_parser(self):
         if self._enable_by_default:
-            self._base_parser.add_argument(f"--no_{self._interactive_flag}",
-                                           help=f"Disables the {self.__class__.__name__} prompt")
+            help_text = f"Disables the {self.__class__.__name__} prompt"
         else:
-            self._base_parser.add_argument(f"--{self._interactive_flag}",
-                                           help=f"Enables the {self.__class__.__name__} prompt")
+            help_text = f"Enables the {self.__class__.__name__} prompt"
+        self._base_parser.add_argument(
+            self._flag_option, dest=self._flag_dest, action="store_true", help=help_text,
+        )
+
+    def _should_prompt(self, args: List[str]) -> bool:
+        flag_present = self._flag_option in args
+        remaining_args = [a for a in args if a != self._flag_option]
+        if self._enable_by_default:
+            return not flag_present and not remaining_args
+        return flag_present and not remaining_args
 
     def parse_known_args(self, args=None, namespace=None):
-        # TODO Add as overwrites
         if args is None:
             # args default to the system args
             args = sys.argv[1:]
@@ -116,7 +113,12 @@ class InteractiveArgumentParser:
             args = list(args)
 
         if self._namespace:
-            return Namespace(**self._namespace.__dict__.copy()), args
+            return Namespace(**self._namespace.__dict__.copy()), []
+
+        if not self._should_prompt(args):
+            # Real arguments (or an explicit opt-out flag) were supplied:
+            # defer to the base parser's normal, non-interactive parsing.
+            return ArgumentParser.parse_known_args(self._base_parser, args, namespace)
 
         # default Namespace built from parser defaults
         if namespace is None:
@@ -136,7 +138,9 @@ class InteractiveArgumentParser:
                 setattr(namespace, dest, self._defaults[dest])
 
         questions = [
-            _argparse_action_to_question(action) for action in actions
+            _argparse_action_to_question(action)
+            for action in actions
+            if action.dest != self._flag_dest
         ]
         questions = list(filter(not_none, questions))
         answers = self._prompter(questions)
