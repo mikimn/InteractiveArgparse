@@ -1,6 +1,13 @@
+import collections
+import collections.abc
 import sys
 from argparse import ArgumentParser, Action, Namespace, SUPPRESS, _SubParsersAction
 from typing import Optional, Any, Callable, List
+
+# PyInquirer's pinned `prompt_toolkit<2.0` imports ABCs from `collections`,
+# which were removed in Python 3.10. Restore them before importing PyInquirer.
+if not hasattr(collections, "Mapping"):
+    collections.Mapping = collections.abc.Mapping
 
 from PyInquirer import prompt as pyinquierer_prompt
 
@@ -22,6 +29,7 @@ def _argparse_action_to_question(action: Action) -> Optional[dict]:
     if isinstance(action, _SubParsersAction):
         # Subparsers expose `choices` as a dict of sub-parsers, which isn't a
         # valid PyInquirer choice list. Not supported yet, so skip them.
+        # TODO: track proper subparser support in a follow-up issue.
         return None
     guessed_type = type(action.default)
     if action.default is None:

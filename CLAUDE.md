@@ -52,10 +52,10 @@ python examples/simple.py
 - Question-type inference from an `Action` (in `_argparse_action_to_question`) maps argparse concepts to PyInquirer question types: `nargs` of `"+"` or `>1` becomes a `checkbox`; an action with `choices` becomes a `list`; otherwise the type is guessed from `action.default`/`action.type` (`int`/`str`/`float` -> `input`, `bool` -> `confirm`).
 - The parser caches the resulting `Namespace` (`self._namespace`) after the first prompt so repeated calls to `parse_known_args` don't re-prompt the user.
 - The `prompter` is injectable via the constructor, which is what makes the library testable without an actual terminal prompt — see `FakePrompter` in [tests/test_interactive_parser.py](tests/test_interactive_parser.py), which answers questions from a dict instead of prompting interactively.
-- `_interactive_flag`/`_enable_by_default`/`_init_interactive_parser` are present for opting in/out of interactive mode via a `--no_interactive`/`--interactive` flag, but `_init_interactive_parser` is currently not called from `__init__` (commented out), so this toggle is not yet wired up.
+- `_init_interactive_parser` (called from `__init__`) adds a `--no_interactive`/`--interactive` flag (name/polarity controlled by `interactive_flag`/`enable_by_default`) to the wrapped parser. `parse_known_args` skips prompting — delegating to the base parser's real, unpatched `ArgumentParser.parse_known_args` — whenever that flag is passed or real CLI args are supplied; it only prompts on a fully bare invocation.
 
 ## Notes
 
-- Supported Python versions: `>=3.7` (per [setup.cfg](setup.cfg)); CI matrix tests 3.6–3.8.
+- Supported Python versions: `>=3.7` (per [setup.cfg](setup.cfg)); CI matrix tests 3.8, 3.9, and 3.12. A `collections.Mapping` compat shim in [interactive_parser.py](interactive_argparse/parse/interactive_parser.py) is required for PyInquirer's pinned `prompt_toolkit<2.0` to import on Python 3.10+.
 - Runtime dependencies are pinned in [requirements.txt](requirements.txt): `PyInquirer`, `prompt_toolkit`, `rich`.
 - PRs should address a single concern with minimal changed lines, and include tests for changed functionality — see [CONTRIBUTING.md](CONTRIBUTING.md).
