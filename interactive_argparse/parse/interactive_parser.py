@@ -1,5 +1,6 @@
 import collections
 import collections.abc
+import functools
 import sys
 from argparse import ArgumentParser, Action, Namespace, SUPPRESS, _SubParsersAction
 from typing import Optional, Any, Callable, List
@@ -160,3 +161,25 @@ class InteractiveArgumentParser:
             setattr(namespace, key, value)
         self._namespace = Namespace(**namespace.__dict__.copy())
         return namespace, []
+
+
+def interactive(fn: Callable[..., ArgumentParser]) -> Callable[..., InteractiveArgumentParser]:
+    """Decorate a function that builds and returns an `ArgumentParser` so it
+    returns an `InteractiveArgumentParser` wrapping it instead, using
+    `InteractiveArgumentParser`'s defaults.
+
+        @interactive
+        def build_parser():
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--name")
+            return parser
+
+        args = build_parser().parse_args()
+
+    For custom configuration (prompter, interactive_flag, enable_by_default),
+    construct `InteractiveArgumentParser` directly instead.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return InteractiveArgumentParser(fn(*args, **kwargs))
+    return wrapper
