@@ -38,7 +38,7 @@ jobs:
           python -m pytest --cov=interactive_argparse
           coverage-badge -o docs/assets/coverage.svg -f
       - name: Update Coverage
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && matrix.python-version == '3.9'
         uses: EndBug/add-and-commit@v7 # You can change this to use a specific version
         with:
           # The arguments for the `git add` command (see the paragraph below for more info)
