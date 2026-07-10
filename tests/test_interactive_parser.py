@@ -1,11 +1,12 @@
 import argparse
 import pathlib
+import sys
 from typing import List
 
 import pytest
 
-from interactive_argparse import InteractiveArgumentParser, interactive
-from interactive_argparse.parse.interactive_parser import _argparse_action_to_question
+from interactive_argparse import InteractiveArgumentParser, interactive, QuestionKind, PyInquirerPrompter
+from interactive_argparse.parse.interactive_parser import _argparse_action_to_question, Question
 
 
 class FakePrompter:
@@ -14,19 +15,10 @@ class FakePrompter:
         self.mapping = mapping
         self.call_count = 0
 
-    def __call__(self, questions: List[dict]):
+    def __call__(self, questions: List[Question]):
         self.call_count += 1
         self.questions = questions
-        result = {}
-        for q in questions:
-            name = q.get("name")
-            val = self.mapping.get(name, q.get("default"))
-            filter_fn = q.get("filter")
-            if filter_fn is not None:
-                val = filter_fn(val)
-            result[name] = val
-
-        return result
+        return {q.name: self.mapping.get(q.name, q.default) for q in questions}
 
 
 class TestInteractiveParser:
@@ -69,73 +61,76 @@ class TestInteractiveParser:
 
 
 class TestArgparseActionToQuestion:
-    def test_store_true_action_is_confirm_type(self):
+    def test_store_true_action_is_confirm_kind(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("--should_greet", action="store_true")
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "confirm"
-        assert question["default"] is False
+        assert question.kind == QuestionKind.CONFIRM
+        assert question.default is False
 
-    def test_choices_without_nargs_is_list_type(self):
+    def test_choices_without_nargs_is_single_choice_kind(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("--color", choices=["red", "green", "blue"], default="red")
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "list"
-        assert question["choices"] == ["red", "green", "blue"]
-        # "list" defaults are passed through as-is, not stringified
-        assert question["default"] == "red"
+        assert question.kind == QuestionKind.SINGLE_CHOICE
+        assert question.choices == ["red", "green", "blue"]
+        assert question.default == "red"
 
-    def test_nargs_plus_is_checkbox_type(self):
+    def test_nargs_plus_is_multi_choice_kind(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("--list", nargs="+")
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "checkbox"
+        assert question.kind == QuestionKind.MULTI_CHOICE
 
-    def test_nargs_int_greater_than_one_is_checkbox_type(self):
+    def test_nargs_int_greater_than_one_is_multi_choice_kind(self):
         # Regression test: action.nargs can be a plain int (e.g. nargs=2),
         # which previously crashed on `action.nargs.isnumeric()`.
         parser = argparse.ArgumentParser()
         parser.add_argument("--pair", nargs=2)
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "checkbox"
+        assert question.kind == QuestionKind.MULTI_CHOICE
 
-    def test_checkbox_default_is_not_stringified(self):
+    def test_multi_choice_default_is_a_raw_list(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("--tags", nargs="+", default=["a", "b"])
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "checkbox"
-        assert question["default"] == ["a", "b"]
+        assert question.kind == QuestionKind.MULTI_CHOICE
+        assert question.default == ["a", "b"]
 
-    def test_positional_without_default_has_no_filter_or_default(self):
+    def test_positional_without_default_has_no_cast_or_default(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("name")
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "input"
-        assert "default" not in question
-        assert "filter" not in question
+        assert question.kind == QuestionKind.TEXT
+        assert question.default is None
+        assert question.cast is None
 
-    def test_type_int_without_default_gets_int_filter(self):
+    def test_type_int_without_default_gets_int_cast(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("--count", type=int)
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["filter"]("5") == 5
+        assert question.kind == QuestionKind.INT
+        assert question.cast("5") == 5
 
-    def test_input_default_is_stringified(self):
+    def test_int_default_is_raw_not_stringified(self):
+        # Stringifying for text-based prompts (e.g. PyInquirer's "input"
+        # question) is a prompter concern now, not a Question concern - see
+        # TestPyInquirerPrompter for that translation.
         parser = argparse.ArgumentParser()
         parser.add_argument("--count", type=int, default=5)
         question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "input"
-        assert question["default"] == "5"
-        assert isinstance(question["default"], str)
+        assert question.kind == QuestionKind.INT
+        assert question.default == 5
+        assert isinstance(question.default, int)
 
-    def test_custom_type_outside_known_set_has_no_filter(self):
+    def test_custom_type_outside_known_set_has_no_cast(self):
         # Documents current behavior: custom `type=` callables that aren't
-        # int/str/bool/float are not applied as a filter, so the answer
-        # stays as the raw (usually string) value from the prompter.
+        # int/str/bool/float are not applied as a cast, so the answer stays
+        # as the raw (usually string) value from the prompter.
         parser = argparse.ArgumentParser()
         parser.add_argument("--path", type=pathlib.Path)
         question = _argparse_action_to_question(parser._actions[-1])
-        assert "filter" not in question
+        assert question.cast is None
 
     def test_suppress_default_returns_none(self):
         parser = argparse.ArgumentParser()
@@ -148,6 +143,57 @@ class TestArgparseActionToQuestion:
         subparsers = parser.add_subparsers(dest="command")
         subparsers.add_parser("run")
         assert _argparse_action_to_question(parser._actions[-1]) is None
+
+
+class TestPyInquirerPrompter:
+    def test_text_like_kinds_map_to_input_type(self):
+        for kind in (QuestionKind.TEXT, QuestionKind.INT, QuestionKind.FLOAT):
+            question = Question(name="n", message="m", kind=kind)
+            result = PyInquirerPrompter._to_pyinquirer_dict(question)
+            assert result["type"] == "input"
+
+    def test_confirm_kind_maps_to_confirm_type_with_raw_default(self):
+        question = Question(name="n", message="m", kind=QuestionKind.CONFIRM, default=True)
+        result = PyInquirerPrompter._to_pyinquirer_dict(question)
+        assert result["type"] == "confirm"
+        assert result["default"] is True
+
+    def test_single_choice_kind_maps_to_list_type(self):
+        question = Question(
+            name="n", message="m", kind=QuestionKind.SINGLE_CHOICE,
+            default="red", choices=["red", "green"],
+        )
+        result = PyInquirerPrompter._to_pyinquirer_dict(question)
+        assert result["type"] == "list"
+        assert result["choices"] == ["red", "green"]
+        assert result["default"] == "red"
+
+    def test_multi_choice_kind_maps_to_checkbox_type_with_raw_default(self):
+        question = Question(name="n", message="m", kind=QuestionKind.MULTI_CHOICE, default=["a", "b"])
+        result = PyInquirerPrompter._to_pyinquirer_dict(question)
+        assert result["type"] == "checkbox"
+        assert result["default"] == ["a", "b"]
+
+    def test_int_default_is_stringified_for_pyinquirer(self):
+        question = Question(name="n", message="m", kind=QuestionKind.INT, default=5)
+        result = PyInquirerPrompter._to_pyinquirer_dict(question)
+        assert result["default"] == "5"
+        assert isinstance(result["default"], str)
+
+    def test_no_default_omits_default_key(self):
+        question = Question(name="n", message="m", kind=QuestionKind.TEXT)
+        result = PyInquirerPrompter._to_pyinquirer_dict(question)
+        assert "default" not in result
+
+    def test_no_choices_omits_choices_key(self):
+        question = Question(name="n", message="m", kind=QuestionKind.TEXT)
+        result = PyInquirerPrompter._to_pyinquirer_dict(question)
+        assert "choices" not in result
+
+    def test_pyinquirer_is_not_imported_until_prompter_is_used(self):
+        assert "PyInquirer" not in sys.modules
+        PyInquirerPrompter()
+        assert "PyInquirer" not in sys.modules
 
 
 class TestInteractiveParserEndToEnd:
@@ -259,6 +305,21 @@ class TestInteractiveParserEndToEnd:
         iparser = InteractiveArgumentParser(parser, prompter=prompter)
         namespace = iparser.parse_args([])
         assert namespace.name == "bob"
+
+    def test_coercion_is_applied_regardless_of_prompter(self):
+        # A "dumb" prompter that always returns raw strings, the way a naive
+        # web form might, without knowing anything about type coercion.
+        # InteractiveArgumentParser must still produce correctly-typed
+        # values - coercion is no longer something prompters opt into.
+        def dumb_prompter(questions):
+            return {q.name: "5" if q.name == "count" else str(q.default) for q in questions}
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--count", type=int, default=0)
+        iparser = InteractiveArgumentParser(parser, prompter=dumb_prompter)
+        namespace = iparser.parse_args([])
+        assert namespace.count == 5
+        assert isinstance(namespace.count, int)
 
 
 class TestInteractiveDecorator:

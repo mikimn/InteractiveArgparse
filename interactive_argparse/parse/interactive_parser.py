@@ -1,16 +1,36 @@
-import collections
-import collections.abc
 import functools
 import sys
 from argparse import ArgumentParser, Action, Namespace, SUPPRESS, _SubParsersAction
-from typing import Optional, Any, Callable, List
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, Any, Callable, Dict, List
 
-# PyInquirer's pinned `prompt_toolkit<2.0` imports ABCs from `collections`,
-# which were removed in Python 3.10. Restore them before importing PyInquirer.
-if not hasattr(collections, "Mapping"):
-    collections.Mapping = collections.abc.Mapping
 
-from PyInquirer import prompt as pyinquierer_prompt
+class QuestionKind(Enum):
+    TEXT = "text"
+    INT = "int"
+    FLOAT = "float"
+    CONFIRM = "confirm"
+    SINGLE_CHOICE = "single_choice"
+    MULTI_CHOICE = "multi_choice"
+
+
+@dataclass
+class Question:
+    """A prompter-agnostic description of a single argument to ask about.
+
+    `default` and `choices` hold raw, correctly-typed values (never
+    stringified) - it's up to each prompter to format them however its UI
+    needs. `cast`, if set, is applied by `InteractiveArgumentParser` itself
+    to whatever raw value a prompter returns; prompters never need to call
+    it themselves.
+    """
+    name: str
+    message: str
+    kind: QuestionKind
+    default: Any = None
+    choices: Optional[List[Any]] = None
+    cast: Optional[Callable[[Any], Any]] = None
 
 
 def format_question(action_name: str, action_help: str, default=None):
@@ -24,12 +44,12 @@ def format_question(action_name: str, action_help: str, default=None):
     return f"{action_name} ({action_help}) [default = {default}]:"
 
 
-def _argparse_action_to_question(action: Action) -> Optional[dict]:
+def _argparse_action_to_question(action: Action) -> Optional[Question]:
     if action.default == SUPPRESS:
         return None
     if isinstance(action, _SubParsersAction):
         # Subparsers expose `choices` as a dict of sub-parsers, which isn't a
-        # valid PyInquirer choice list. Not supported yet, so skip them.
+        # valid choice list. Not supported yet, so skip them.
         # TODO: track proper subparser support in a follow-up issue.
         return None
     guessed_type = type(action.default)
@@ -38,41 +58,87 @@ def _argparse_action_to_question(action: Action) -> Optional[dict]:
             guessed_type = action.type
 
     if action.nargs and (action.nargs == "+" or (isinstance(action.nargs, int) and action.nargs > 1)):
-        q_type = "checkbox"
+        kind = QuestionKind.MULTI_CHOICE
     elif (not action.nargs or action.nargs == 1) and action.choices is not None:
-        q_type = "list"
+        kind = QuestionKind.SINGLE_CHOICE
     else:
-        q_type = {
-            int: 'input',
-            str: 'input',
-            float: 'input',
-            bool: 'confirm',
-        }.get(guessed_type, "input")
-    result = {
-        "type": q_type,
-        "name": action.dest,
-        "message": format_question(action.dest, action.help, action.default),
-    }
-    if action.default is not None:
-        # PyInquirer's "input" prompt renders the default as text, so it must
-        # be a string; "list"/"checkbox"/"confirm" expect the raw value.
-        result["default"] = str(action.default) if q_type == "input" else action.default
-    if not isinstance(None, guessed_type):
-        result["filter"] = lambda x: guessed_type(x)
-    if action.choices:
-        result["choices"] = action.choices
-    return result
+        kind = {
+            int: QuestionKind.INT,
+            str: QuestionKind.TEXT,
+            float: QuestionKind.FLOAT,
+            bool: QuestionKind.CONFIRM,
+        }.get(guessed_type, QuestionKind.TEXT)
+
+    cast = guessed_type if not isinstance(None, guessed_type) else None
+    return Question(
+        name=action.dest,
+        message=format_question(action.dest, action.help, action.default),
+        kind=kind,
+        default=action.default,
+        choices=list(action.choices) if action.choices else None,
+        cast=cast,
+    )
 
 
 def not_none(x: Optional[Any]):
     return x is not None
 
 
+class PyInquirerPrompter:
+    """Default prompter: renders `Question`s as a terminal prompt via
+    PyInquirer. PyInquirer is only imported the first time this prompter is
+    actually invoked, so constructing (or not using) it costs nothing for
+    callers who plug in a different prompter.
+    """
+
+    _TYPE_MAP = {
+        QuestionKind.TEXT: "input",
+        QuestionKind.INT: "input",
+        QuestionKind.FLOAT: "input",
+        QuestionKind.CONFIRM: "confirm",
+        QuestionKind.SINGLE_CHOICE: "list",
+        QuestionKind.MULTI_CHOICE: "checkbox",
+    }
+
+    def __call__(self, questions: List[Question]) -> Dict[str, Any]:
+        prompt = self._load_prompt()
+        return prompt([self._to_pyinquirer_dict(q) for q in questions])
+
+    @staticmethod
+    def _load_prompt():
+        import collections
+        import collections.abc
+        # PyInquirer's pinned `prompt_toolkit<2.0` imports ABCs from
+        # `collections`, which were removed in Python 3.10. Restore them
+        # before importing PyInquirer.
+        if not hasattr(collections, "Mapping"):
+            collections.Mapping = collections.abc.Mapping
+        from PyInquirer import prompt
+        return prompt
+
+    @classmethod
+    def _to_pyinquirer_dict(cls, question: Question) -> dict:
+        result = {
+            "type": cls._TYPE_MAP[question.kind],
+            "name": question.name,
+            "message": question.message,
+        }
+        if question.default is not None:
+            # PyInquirer's "input" prompt renders the default as text, so it
+            # must be a string; "confirm"/"list"/"checkbox" expect the raw
+            # value.
+            is_text_like = question.kind in (QuestionKind.TEXT, QuestionKind.INT, QuestionKind.FLOAT)
+            result["default"] = str(question.default) if is_text_like else question.default
+        if question.choices:
+            result["choices"] = question.choices
+        return result
+
+
 class InteractiveArgumentParser:
     def __init__(
             self,
             base_parser: ArgumentParser,
-            prompter: Callable[[List[dict]], Any] = pyinquierer_prompt,
+            prompter: Optional[Callable[[List[Question]], Dict[str, Any]]] = None,
             interactive_flag: str = "interactive",
             enable_by_default=True,
     ) -> None:
@@ -83,7 +149,7 @@ class InteractiveArgumentParser:
         self._base_parser.parse_known_args = self.parse_known_args
         self._namespace = None
         self._args = None
-        self._prompter = prompter
+        self._prompter = prompter if prompter is not None else PyInquirerPrompter()
         self._interactive_flag = interactive_flag.replace("--", "")
         self._enable_by_default = enable_by_default
         self._flag_dest = f"no_{self._interactive_flag}" if enable_by_default else self._interactive_flag
@@ -157,7 +223,12 @@ class InteractiveArgumentParser:
         if len(answers) == 0 and len(questions) > 0:
             # Cancelled by user
             exit()
+
+        casts = {question.name: question.cast for question in questions}
         for key, value in answers.items():
+            cast = casts.get(key)
+            if cast is not None:
+                value = cast(value)
             setattr(namespace, key, value)
         self._namespace = Namespace(**namespace.__dict__.copy())
         return namespace, []
