@@ -1,6 +1,6 @@
 import pytest
 
-from interactive_argparse import Prompter, PyInquirerPrompter
+from interactive_argparse import Prompter, PyInquirerPrompter, WebPrompter
 
 
 class TestPrompterRegistry:
@@ -28,3 +28,6 @@ class TestPrompterRegistry:
 
     def test_pyinquirer_prompter_is_registered(self):
         assert Prompter.registry["pyinquirer"] is PyInquirerPrompter
+
+    def test_web_prompter_is_registered(self):
+        assert Prompter.registry["web"] is WebPrompter

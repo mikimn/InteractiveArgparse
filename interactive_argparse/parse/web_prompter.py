@@ -1,9 +1,10 @@
 from typing import Any, Dict, List
 
-from .interactive_parser import Question, QuestionKind
+from .prompter import Prompter
+from .question import Question, QuestionKind
 
 
-class WebPrompter:
+class WebPrompter(Prompter):
     """Renders `Question`s as an auto-generated web form, using PyWebIO.
 
     PyWebIO's `input_group` blocks until the form is submitted - the same
@@ -12,7 +13,10 @@ class WebPrompter:
     plumbing is needed here. PyWebIO is a `web` extra (`pip install
     InteractiveArgparse[web]`) and is only imported the first time this
     prompter is actually invoked.
+
+    Registered as "web" - usable via `@interactive("web")`.
     """
+    name = "web"
 
     def __call__(self, questions: List[Question]) -> Dict[str, Any]:
         pywebio_input = self._load_pywebio_input()
