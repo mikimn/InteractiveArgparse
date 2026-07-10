@@ -1,1 +1,1 @@
-from .interactive_parser import InteractiveArgumentParser
+from .interactive_parser import InteractiveArgumentParser, interactive

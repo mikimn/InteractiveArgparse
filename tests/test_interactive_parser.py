@@ -4,7 +4,7 @@ from typing import List
 
 import pytest
 
-from interactive_argparse import InteractiveArgumentParser
+from interactive_argparse import InteractiveArgumentParser, interactive
 from interactive_argparse.parse.interactive_parser import _argparse_action_to_question
 
 
@@ -259,3 +259,65 @@ class TestInteractiveParserEndToEnd:
         iparser = InteractiveArgumentParser(parser, prompter=prompter)
         namespace = iparser.parse_args([])
         assert namespace.name == "bob"
+
+
+class TestInteractiveDecorator:
+    def test_decorated_function_returns_interactive_argument_parser(self):
+        @interactive
+        def build_parser():
+            parser = argparse.ArgumentParser(description="desc")
+            parser.add_argument("--name")
+            return parser
+
+        wrapped = build_parser()
+        assert isinstance(wrapped, InteractiveArgumentParser)
+        assert wrapped.description == "desc"
+
+    def test_functools_wraps_preserves_identity(self):
+        @interactive
+        def build_parser():
+            """Builds a parser."""
+            return argparse.ArgumentParser()
+
+        assert build_parser.__name__ == "build_parser"
+        assert build_parser.__doc__ == "Builds a parser."
+
+    def test_args_and_kwargs_passthrough(self):
+        @interactive
+        def build_parser(prog_name):
+            return argparse.ArgumentParser(prog=prog_name)
+
+        wrapped = build_parser("myprog")
+        assert wrapped.prog == "myprog"
+
+    def test_each_call_returns_a_fresh_instance(self):
+        @interactive
+        def build_parser():
+            return argparse.ArgumentParser()
+
+        first = build_parser()
+        second = build_parser()
+        assert first is not second
+        assert first._base_parser is not second._base_parser
+
+    def test_real_args_skip_prompting_through_decorator(self):
+        @interactive
+        def build_parser():
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--name")
+            return parser
+
+        namespace = build_parser().parse_args(["--name", "Alice"])
+        assert namespace.name == "Alice"
+
+    def test_prompting_works_end_to_end_through_decorator(self):
+        @interactive
+        def build_parser():
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--name", default="default")
+            return parser
+
+        wrapped = build_parser()
+        wrapped._prompter = FakePrompter({"name": "Alice"})
+        namespace = wrapped.parse_args([])
+        assert namespace.name == "Alice"

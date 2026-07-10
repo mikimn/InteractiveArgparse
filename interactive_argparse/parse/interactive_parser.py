@@ -1,5 +1,6 @@
 import collections
 import collections.abc
+import functools
 import sys
 from argparse import ArgumentParser, Action, Namespace, SUPPRESS, _SubParsersAction
 from typing import Optional, Any, Callable, List
@@ -160,3 +161,10 @@ class InteractiveArgumentParser:
             setattr(namespace, key, value)
         self._namespace = Namespace(**namespace.__dict__.copy())
         return namespace, []
+
+
+def interactive(fn: Callable[..., ArgumentParser]) -> Callable[..., InteractiveArgumentParser]:
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return InteractiveArgumentParser(fn(*args, **kwargs))
+    return wrapper
