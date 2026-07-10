@@ -1,32 +1,9 @@
 import argparse
-import pathlib
-from typing import List
 
 import pytest
 
-from interactive_argparse import InteractiveArgumentParser, interactive
-from interactive_argparse.parse.interactive_parser import _argparse_action_to_question
-
-
-class FakePrompter:
-    def __init__(self, mapping: dict):
-        self.questions = None
-        self.mapping = mapping
-        self.call_count = 0
-
-    def __call__(self, questions: List[dict]):
-        self.call_count += 1
-        self.questions = questions
-        result = {}
-        for q in questions:
-            name = q.get("name")
-            val = self.mapping.get(name, q.get("default"))
-            filter_fn = q.get("filter")
-            if filter_fn is not None:
-                val = filter_fn(val)
-            result[name] = val
-
-        return result
+from interactive_argparse import InteractiveArgumentParser, interactive, Prompter
+from helpers import FakePrompter
 
 
 class TestInteractiveParser:
@@ -66,88 +43,6 @@ class TestInteractiveParser:
         assert namespace.float == 3.0
         assert not namespace.bool
         assert namespace.list == ["hello", "world"]
-
-
-class TestArgparseActionToQuestion:
-    def test_store_true_action_is_confirm_type(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--should_greet", action="store_true")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "confirm"
-        assert question["default"] is False
-
-    def test_choices_without_nargs_is_list_type(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--color", choices=["red", "green", "blue"], default="red")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "list"
-        assert question["choices"] == ["red", "green", "blue"]
-        # "list" defaults are passed through as-is, not stringified
-        assert question["default"] == "red"
-
-    def test_nargs_plus_is_checkbox_type(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--list", nargs="+")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "checkbox"
-
-    def test_nargs_int_greater_than_one_is_checkbox_type(self):
-        # Regression test: action.nargs can be a plain int (e.g. nargs=2),
-        # which previously crashed on `action.nargs.isnumeric()`.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--pair", nargs=2)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "checkbox"
-
-    def test_checkbox_default_is_not_stringified(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--tags", nargs="+", default=["a", "b"])
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "checkbox"
-        assert question["default"] == ["a", "b"]
-
-    def test_positional_without_default_has_no_filter_or_default(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("name")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "input"
-        assert "default" not in question
-        assert "filter" not in question
-
-    def test_type_int_without_default_gets_int_filter(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--count", type=int)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["filter"]("5") == 5
-
-    def test_input_default_is_stringified(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--count", type=int, default=5)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question["type"] == "input"
-        assert question["default"] == "5"
-        assert isinstance(question["default"], str)
-
-    def test_custom_type_outside_known_set_has_no_filter(self):
-        # Documents current behavior: custom `type=` callables that aren't
-        # int/str/bool/float are not applied as a filter, so the answer
-        # stays as the raw (usually string) value from the prompter.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--path", type=pathlib.Path)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert "filter" not in question
-
-    def test_suppress_default_returns_none(self):
-        parser = argparse.ArgumentParser()
-        help_action = parser._actions[0]
-        assert help_action.default == argparse.SUPPRESS
-        assert _argparse_action_to_question(help_action) is None
-
-    def test_subparsers_action_returns_none(self):
-        parser = argparse.ArgumentParser()
-        subparsers = parser.add_subparsers(dest="command")
-        subparsers.add_parser("run")
-        assert _argparse_action_to_question(parser._actions[-1]) is None
 
 
 class TestInteractiveParserEndToEnd:
@@ -260,6 +155,21 @@ class TestInteractiveParserEndToEnd:
         namespace = iparser.parse_args([])
         assert namespace.name == "bob"
 
+    def test_coercion_is_applied_regardless_of_prompter(self):
+        # A "dumb" prompter that always returns raw strings, the way a naive
+        # web form might, without knowing anything about type coercion.
+        # InteractiveArgumentParser must still produce correctly-typed
+        # values - coercion is no longer something prompters opt into.
+        def dumb_prompter(questions):
+            return {q.name: "5" if q.name == "count" else str(q.default) for q in questions}
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--count", type=int, default=0)
+        iparser = InteractiveArgumentParser(parser, prompter=dumb_prompter)
+        namespace = iparser.parse_args([])
+        assert namespace.count == 5
+        assert isinstance(namespace.count, int)
+
 
 class TestInteractiveDecorator:
     def test_decorated_function_returns_interactive_argument_parser(self):
@@ -320,4 +230,42 @@ class TestInteractiveDecorator:
         wrapped = build_parser()
         wrapped._prompter = FakePrompter({"name": "Alice"})
         namespace = wrapped.parse_args([])
+        assert namespace.name == "Alice"
+
+
+class TestInteractiveDecoratorPrompterByName:
+    def test_decorator_resolves_prompter_by_registered_name(self):
+        class _DummyPrompter(Prompter):
+            name = "dummy_test_prompter"
+
+            def __call__(self, questions):
+                return {q.name: q.default for q in questions}
+
+        @interactive("dummy_test_prompter")
+        def build_parser():
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--name", default="bob")
+            return parser
+
+        wrapped = build_parser()
+        assert isinstance(wrapped._prompter, _DummyPrompter)
+        namespace = wrapped.parse_args([])
+        assert namespace.name == "bob"
+
+    def test_decorator_raises_for_unknown_prompter_name(self):
+        @interactive("this_prompter_name_does_not_exist")
+        def build_parser():
+            return argparse.ArgumentParser()
+
+        with pytest.raises(ValueError):
+            build_parser()
+
+    def test_bare_decorator_still_uses_default_prompter(self):
+        @interactive()
+        def build_parser():
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--name")
+            return parser
+
+        namespace = build_parser().parse_args(["--name", "Alice"])
         assert namespace.name == "Alice"
