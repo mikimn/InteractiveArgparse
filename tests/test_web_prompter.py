@@ -37,6 +37,15 @@ class _RecordingPyWebIOInput:
         return self.input_group_result
 
 
+def _noop_config(**kwargs):
+    pass
+
+
+class _NoOpPywebioSession:
+    def set_env(self, **kwargs):
+        pass
+
+
 class TestWebPrompter:
     @staticmethod
     def _call(question: Question):
@@ -98,6 +107,38 @@ class TestWebPrompter:
         assert kwargs["options"] == ["a", "b"]
         assert kwargs["value"] == ["a"]
 
+    def test_label_is_humanized_from_dest_name(self):
+        question = Question(name="should_greet", message="m", kind=QuestionKind.TEXT)
+        func, label, kwargs = self._call(question)
+        assert label == "Should greet"
+
+    def test_help_text_uses_question_help_not_the_terminal_message(self):
+        question = Question(name="n", message="n (some help) [default = x]:", kind=QuestionKind.TEXT, help="some help")
+        func, label, kwargs = self._call(question)
+        assert kwargs["help_text"] == "some help"
+        assert label == "N"
+
+    def test_help_text_is_none_when_question_has_no_help(self):
+        question = Question(name="n", message="m", kind=QuestionKind.TEXT)
+        func, label, kwargs = self._call(question)
+        assert kwargs["help_text"] is None
+
+    def test_free_form_multi_choice_help_text_combines_question_help_and_hint(self):
+        question = Question(
+            name="tags", message="m", kind=QuestionKind.MULTI_CHOICE,
+            choices=None, help="Some tags",
+        )
+        func, label, kwargs = self._call(question)
+        assert kwargs["help_text"] == "Some tags. Separate multiple values with spaces."
+
+    def test_free_form_multi_choice_help_text_does_not_double_punctuate(self):
+        question = Question(
+            name="tags", message="m", kind=QuestionKind.MULTI_CHOICE,
+            choices=None, help="Some tags.",
+        )
+        func, label, kwargs = self._call(question)
+        assert kwargs["help_text"] == "Some tags. Separate multiple values with spaces."
+
     def test_multi_choice_without_choices_falls_back_to_text_input(self):
         # No fixed choice set to render checkboxes for - a free-form
         # nargs="+" argument. __call__ splits the submitted text back into
@@ -111,15 +152,21 @@ class TestWebPrompter:
         assert kwargs["value"] == "a b"
 
     def test_call_splits_free_form_multi_choice_answer_into_a_list(self, monkeypatch):
-        fake = _RecordingPyWebIOInput(input_group_result={"tags": "a b c"})
-        monkeypatch.setattr(WebPrompter, "_load_pywebio_input", staticmethod(lambda: fake))
+        fake_input = _RecordingPyWebIOInput(input_group_result={"tags": "a b c"})
+        monkeypatch.setattr(
+            WebPrompter, "_load_pywebio",
+            staticmethod(lambda: (_noop_config, _NoOpPywebioSession(), fake_input)),
+        )
         question = Question(name="tags", message="m", kind=QuestionKind.MULTI_CHOICE)
         result = WebPrompter()([question])
         assert result == {"tags": ["a", "b", "c"]}
 
     def test_call_returns_empty_dict_when_cancelled(self, monkeypatch):
-        fake = _RecordingPyWebIOInput(input_group_result=None)
-        monkeypatch.setattr(WebPrompter, "_load_pywebio_input", staticmethod(lambda: fake))
+        fake_input = _RecordingPyWebIOInput(input_group_result=None)
+        monkeypatch.setattr(
+            WebPrompter, "_load_pywebio",
+            staticmethod(lambda: (_noop_config, _NoOpPywebioSession(), fake_input)),
+        )
         question = Question(name="n", message="m", kind=QuestionKind.TEXT)
         result = WebPrompter()([question])
         assert result == {}

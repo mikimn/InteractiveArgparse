@@ -50,6 +50,18 @@ class TestArgparseActionToQuestion:
         assert question.default is None
         assert question.cast is None
 
+    def test_help_is_the_raw_help_string(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--name", help="The user's name.")
+        question = _argparse_action_to_question(parser._actions[-1])
+        assert question.help == "The user's name."
+
+    def test_help_is_none_when_not_provided(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--name")
+        question = _argparse_action_to_question(parser._actions[-1])
+        assert question.help is None
+
     def test_type_int_without_default_gets_int_cast(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("--count", type=int)

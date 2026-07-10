@@ -17,6 +17,12 @@ class QuestionKind(Enum):
 class Question:
     """A prompter-agnostic description of a single argument to ask about.
 
+    `message` is a fully-formatted, terminal-ready prompt string (name,
+    help text and default all combined) - `help` is the raw, unformatted
+    help text alone, for prompters that want to lay out the label and
+    description separately (e.g. as a form field label plus a caption)
+    instead of using `message` as-is.
+
     `default` and `choices` hold raw, correctly-typed values (never
     stringified) - it's up to each prompter to format them however its UI
     needs. `cast`, if set, is applied by `InteractiveArgumentParser` itself
@@ -29,6 +35,7 @@ class Question:
     default: Any = None
     choices: Optional[List[Any]] = None
     cast: Optional[Callable[[Any], Any]] = None
+    help: Optional[str] = None
 
 
 def format_question(action_name: str, action_help: str, default=None):
@@ -75,6 +82,7 @@ def _argparse_action_to_question(action: Action) -> Optional[Question]:
         default=action.default,
         choices=list(action.choices) if action.choices else None,
         cast=cast,
+        help=action.help or None,
     )
 
 
