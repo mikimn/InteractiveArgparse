@@ -1,24 +1,9 @@
 import argparse
-import pathlib
-import sys
-from typing import List
 
 import pytest
 
-from interactive_argparse import InteractiveArgumentParser, interactive, QuestionKind, PyInquirerPrompter
-from interactive_argparse.parse.interactive_parser import _argparse_action_to_question, Question
-
-
-class FakePrompter:
-    def __init__(self, mapping: dict):
-        self.questions = None
-        self.mapping = mapping
-        self.call_count = 0
-
-    def __call__(self, questions: List[Question]):
-        self.call_count += 1
-        self.questions = questions
-        return {q.name: self.mapping.get(q.name, q.default) for q in questions}
+from interactive_argparse import InteractiveArgumentParser, interactive, Prompter
+from helpers import FakePrompter
 
 
 class TestInteractiveParser:
@@ -58,142 +43,6 @@ class TestInteractiveParser:
         assert namespace.float == 3.0
         assert not namespace.bool
         assert namespace.list == ["hello", "world"]
-
-
-class TestArgparseActionToQuestion:
-    def test_store_true_action_is_confirm_kind(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--should_greet", action="store_true")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.CONFIRM
-        assert question.default is False
-
-    def test_choices_without_nargs_is_single_choice_kind(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--color", choices=["red", "green", "blue"], default="red")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.SINGLE_CHOICE
-        assert question.choices == ["red", "green", "blue"]
-        assert question.default == "red"
-
-    def test_nargs_plus_is_multi_choice_kind(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--list", nargs="+")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.MULTI_CHOICE
-
-    def test_nargs_int_greater_than_one_is_multi_choice_kind(self):
-        # Regression test: action.nargs can be a plain int (e.g. nargs=2),
-        # which previously crashed on `action.nargs.isnumeric()`.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--pair", nargs=2)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.MULTI_CHOICE
-
-    def test_multi_choice_default_is_a_raw_list(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--tags", nargs="+", default=["a", "b"])
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.MULTI_CHOICE
-        assert question.default == ["a", "b"]
-
-    def test_positional_without_default_has_no_cast_or_default(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("name")
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.TEXT
-        assert question.default is None
-        assert question.cast is None
-
-    def test_type_int_without_default_gets_int_cast(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--count", type=int)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.INT
-        assert question.cast("5") == 5
-
-    def test_int_default_is_raw_not_stringified(self):
-        # Stringifying for text-based prompts (e.g. PyInquirer's "input"
-        # question) is a prompter concern now, not a Question concern - see
-        # TestPyInquirerPrompter for that translation.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--count", type=int, default=5)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.kind == QuestionKind.INT
-        assert question.default == 5
-        assert isinstance(question.default, int)
-
-    def test_custom_type_outside_known_set_has_no_cast(self):
-        # Documents current behavior: custom `type=` callables that aren't
-        # int/str/bool/float are not applied as a cast, so the answer stays
-        # as the raw (usually string) value from the prompter.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--path", type=pathlib.Path)
-        question = _argparse_action_to_question(parser._actions[-1])
-        assert question.cast is None
-
-    def test_suppress_default_returns_none(self):
-        parser = argparse.ArgumentParser()
-        help_action = parser._actions[0]
-        assert help_action.default == argparse.SUPPRESS
-        assert _argparse_action_to_question(help_action) is None
-
-    def test_subparsers_action_returns_none(self):
-        parser = argparse.ArgumentParser()
-        subparsers = parser.add_subparsers(dest="command")
-        subparsers.add_parser("run")
-        assert _argparse_action_to_question(parser._actions[-1]) is None
-
-
-class TestPyInquirerPrompter:
-    def test_text_like_kinds_map_to_input_type(self):
-        for kind in (QuestionKind.TEXT, QuestionKind.INT, QuestionKind.FLOAT):
-            question = Question(name="n", message="m", kind=kind)
-            result = PyInquirerPrompter._to_pyinquirer_dict(question)
-            assert result["type"] == "input"
-
-    def test_confirm_kind_maps_to_confirm_type_with_raw_default(self):
-        question = Question(name="n", message="m", kind=QuestionKind.CONFIRM, default=True)
-        result = PyInquirerPrompter._to_pyinquirer_dict(question)
-        assert result["type"] == "confirm"
-        assert result["default"] is True
-
-    def test_single_choice_kind_maps_to_list_type(self):
-        question = Question(
-            name="n", message="m", kind=QuestionKind.SINGLE_CHOICE,
-            default="red", choices=["red", "green"],
-        )
-        result = PyInquirerPrompter._to_pyinquirer_dict(question)
-        assert result["type"] == "list"
-        assert result["choices"] == ["red", "green"]
-        assert result["default"] == "red"
-
-    def test_multi_choice_kind_maps_to_checkbox_type_with_raw_default(self):
-        question = Question(name="n", message="m", kind=QuestionKind.MULTI_CHOICE, default=["a", "b"])
-        result = PyInquirerPrompter._to_pyinquirer_dict(question)
-        assert result["type"] == "checkbox"
-        assert result["default"] == ["a", "b"]
-
-    def test_int_default_is_stringified_for_pyinquirer(self):
-        question = Question(name="n", message="m", kind=QuestionKind.INT, default=5)
-        result = PyInquirerPrompter._to_pyinquirer_dict(question)
-        assert result["default"] == "5"
-        assert isinstance(result["default"], str)
-
-    def test_no_default_omits_default_key(self):
-        question = Question(name="n", message="m", kind=QuestionKind.TEXT)
-        result = PyInquirerPrompter._to_pyinquirer_dict(question)
-        assert "default" not in result
-
-    def test_no_choices_omits_choices_key(self):
-        question = Question(name="n", message="m", kind=QuestionKind.TEXT)
-        result = PyInquirerPrompter._to_pyinquirer_dict(question)
-        assert "choices" not in result
-
-    def test_pyinquirer_is_not_imported_until_prompter_is_used(self):
-        assert "PyInquirer" not in sys.modules
-        PyInquirerPrompter()
-        assert "PyInquirer" not in sys.modules
 
 
 class TestInteractiveParserEndToEnd:
@@ -381,4 +230,42 @@ class TestInteractiveDecorator:
         wrapped = build_parser()
         wrapped._prompter = FakePrompter({"name": "Alice"})
         namespace = wrapped.parse_args([])
+        assert namespace.name == "Alice"
+
+
+class TestInteractiveDecoratorPrompterByName:
+    def test_decorator_resolves_prompter_by_registered_name(self):
+        class _DummyPrompter(Prompter):
+            name = "dummy_test_prompter"
+
+            def __call__(self, questions):
+                return {q.name: q.default for q in questions}
+
+        @interactive("dummy_test_prompter")
+        def build_parser():
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--name", default="bob")
+            return parser
+
+        wrapped = build_parser()
+        assert isinstance(wrapped._prompter, _DummyPrompter)
+        namespace = wrapped.parse_args([])
+        assert namespace.name == "bob"
+
+    def test_decorator_raises_for_unknown_prompter_name(self):
+        @interactive("this_prompter_name_does_not_exist")
+        def build_parser():
+            return argparse.ArgumentParser()
+
+        with pytest.raises(ValueError):
+            build_parser()
+
+    def test_bare_decorator_still_uses_default_prompter(self):
+        @interactive()
+        def build_parser():
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--name")
+            return parser
+
+        namespace = build_parser().parse_args(["--name", "Alice"])
         assert namespace.name == "Alice"
