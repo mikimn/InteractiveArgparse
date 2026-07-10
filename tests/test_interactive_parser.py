@@ -1,8 +1,11 @@
 import argparse
 
 import pytest
+import pywebio.input as pywebio_input
 
-from interactive_argparse import InteractiveArgumentParser, interactive, Prompter
+from interactive_argparse import InteractiveArgumentParser, interactive, Prompter, QuestionKind
+from interactive_argparse.parse.question import Question
+from interactive_argparse.parse.web_prompter import WebPrompter
 from helpers import FakePrompter
 
 
@@ -269,3 +272,81 @@ class TestInteractiveDecoratorPrompterByName:
 
         namespace = build_parser().parse_args(["--name", "Alice"])
         assert namespace.name == "Alice"
+
+
+class TestWebPrompter:
+    @staticmethod
+    def _item_spec(question: Question) -> dict:
+        return WebPrompter._to_pywebio_input(pywebio_input, question)["item_spec"]
+
+    def test_text_kind_maps_to_text_input(self):
+        question = Question(name="n", message="m", kind=QuestionKind.TEXT, default="hi")
+        item = self._item_spec(question)
+        assert item["type"] == "text"
+        assert item["name"] == "n"
+        assert item["value"] == "hi"
+
+    def test_int_kind_maps_to_number_input(self):
+        question = Question(name="n", message="m", kind=QuestionKind.INT, default=5)
+        item = self._item_spec(question)
+        assert item["type"] == "number"
+        assert item["value"] == 5
+
+    def test_float_kind_maps_to_float_input(self):
+        question = Question(name="n", message="m", kind=QuestionKind.FLOAT, default=1.5)
+        item = self._item_spec(question)
+        assert item["type"] == "float"
+        assert item["value"] == 1.5
+
+    def test_confirm_kind_maps_to_single_option_checkbox(self):
+        question = Question(name="n", message="m", kind=QuestionKind.CONFIRM, default=True)
+        item = self._item_spec(question)
+        assert item["type"] == "checkbox"
+        assert item["options"][0].get("selected") is True
+
+    def test_confirm_default_false_leaves_checkbox_unselected(self):
+        question = Question(name="n", message="m", kind=QuestionKind.CONFIRM, default=False)
+        item = self._item_spec(question)
+        assert "selected" not in item["options"][0]
+
+    def test_single_choice_kind_maps_to_select(self):
+        question = Question(
+            name="n", message="m", kind=QuestionKind.SINGLE_CHOICE,
+            default="red", choices=["red", "green"],
+        )
+        item = self._item_spec(question)
+        assert item["type"] == "select"
+        assert [o["value"] for o in item["options"]] == ["red", "green"]
+
+    def test_multi_choice_with_choices_maps_to_checkbox(self):
+        question = Question(
+            name="n", message="m", kind=QuestionKind.MULTI_CHOICE,
+            default=["a"], choices=["a", "b"],
+        )
+        item = self._item_spec(question)
+        assert item["type"] == "checkbox"
+        assert [o["value"] for o in item["options"]] == ["a", "b"]
+
+    def test_multi_choice_without_choices_falls_back_to_text_input(self):
+        # No fixed choice set to render checkboxes for - a free-form
+        # nargs="+" argument. __call__ splits the submitted text back into
+        # a list; see test_call_splits_free_form_multi_choice_answer below.
+        question = Question(
+            name="n", message="m", kind=QuestionKind.MULTI_CHOICE,
+            default=["a", "b"], choices=None,
+        )
+        item = self._item_spec(question)
+        assert item["type"] == "text"
+        assert item["value"] == "a b"
+
+    def test_call_splits_free_form_multi_choice_answer_into_a_list(self, monkeypatch):
+        monkeypatch.setattr(pywebio_input, "input_group", lambda *a, **kw: {"tags": "a b c"})
+        question = Question(name="tags", message="m", kind=QuestionKind.MULTI_CHOICE)
+        result = WebPrompter()([question])
+        assert result == {"tags": ["a", "b", "c"]}
+
+    def test_call_returns_empty_dict_when_cancelled(self, monkeypatch):
+        monkeypatch.setattr(pywebio_input, "input_group", lambda *a, **kw: None)
+        question = Question(name="n", message="m", kind=QuestionKind.TEXT)
+        result = WebPrompter()([question])
+        assert result == {}
