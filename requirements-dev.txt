@@ -6,4 +6,3 @@ coverage-badge==1.0.1
 twine
 pre-commit
 setuptools<81  # coverage-badge needs pkg_resources, removed from setuptools in 81
-pywebio<1.8.4  # needed to test WebPrompter's Question-to-widget mapping; 1.8.4 uses `list[str]`, which needs Python 3.9+
