@@ -2,7 +2,8 @@ import argparse
 
 import pytest
 
-from interactive_argparse import InteractiveArgumentParser, interactive, Prompter
+from interactive_argparse import InteractiveArgumentParser, PyInquirerPrompter, interactive, Prompter
+from interactive_argparse.parse.interactive_parser import PROMPTER_ENV_VAR
 from helpers import FakePrompter
 
 
@@ -269,3 +270,43 @@ class TestInteractiveDecoratorPrompterByName:
 
         namespace = build_parser().parse_args(["--name", "Alice"])
         assert namespace.name == "Alice"
+
+
+class TestDefaultPrompterEnvVar:
+    def test_unset_env_var_defaults_to_pyinquirer(self, monkeypatch):
+        monkeypatch.delenv(PROMPTER_ENV_VAR, raising=False)
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, PyInquirerPrompter)
+
+    def test_env_var_set_to_registered_name_resolves_that_prompter(self, monkeypatch):
+        class _EnvDummyPrompter(Prompter):
+            name = "env_dummy_test_prompter"
+
+            def __call__(self, questions):
+                return {q.name: q.default for q in questions}
+
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "env_dummy_test_prompter")
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, _EnvDummyPrompter)
+
+    def test_env_var_set_to_unknown_name_raises(self, monkeypatch):
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "this_prompter_name_does_not_exist")
+        with pytest.raises(ValueError):
+            InteractiveArgumentParser._build_default_prompter()
+
+    def test_constructor_uses_env_var_when_no_prompter_passed_explicitly(self, monkeypatch):
+        class _EnvDummyPrompter2(Prompter):
+            name = "env_dummy_test_prompter_2"
+
+            def __call__(self, questions):
+                return {q.name: q.default for q in questions}
+
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "env_dummy_test_prompter_2")
+        parser = InteractiveArgumentParser(argparse.ArgumentParser())
+        assert isinstance(parser._prompter, _EnvDummyPrompter2)
+
+    def test_explicit_prompter_argument_overrides_env_var(self, monkeypatch):
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "pyinquirer")
+        fake = FakePrompter({})
+        parser = InteractiveArgumentParser(argparse.ArgumentParser(), prompter=fake)
+        assert parser._prompter is fake
