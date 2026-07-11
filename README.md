@@ -10,6 +10,7 @@
 * [Usage](#usage)
 * [Features](#features)
 * [Prompters](#prompters)
+* [Subcommands](#subcommands)
 
 ## Installation
 To install, run
@@ -63,6 +64,12 @@ args = build_parser().parse_args()
 <!-- TODO: add a screenshot of RichPrompter here, like example1.png above. -->
 
 See [docs/prompters.md](docs/prompters.md) for how to use the built-in prompters and how to write your own.
+
+## Subcommands
+
+`ArgumentParser.add_subparsers()` is supported: `InteractiveArgumentParser` prompts for a subcommand first, then prompts for that subcommand's own arguments.
+
+See [docs/subparsers.md](docs/subparsers.md) for details.
 
 ## Development
 

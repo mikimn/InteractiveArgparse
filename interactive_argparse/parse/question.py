@@ -86,5 +86,33 @@ def _argparse_action_to_question(action: Action) -> Optional[Question]:
     )
 
 
+def _subparsers_action_to_question(action: _SubParsersAction) -> Optional[Question]:
+    """Builds a SINGLE_CHOICE `Question` letting the user pick a subcommand
+    added via `add_subparsers()`.
+
+    This is deliberately separate from `_argparse_action_to_question`, which
+    still returns `None` for a `_SubParsersAction`: its `choices` is a
+    `{name: ArgumentParser}` mapping rather than a plain choice list, and
+    picking a subcommand needs different follow-up handling (recursing into
+    the chosen sub-parser's own actions) that a generic per-action question
+    can't express. The caller is responsible for that follow-up; this only
+    builds the question for the choice itself.
+    """
+    if not action.choices:
+        return None
+    names = list(action.choices.keys())
+    default = action.default if action.default in names else names[0]
+    name = action.dest if action.dest != SUPPRESS else "_subcommand"
+    return Question(
+        name=name,
+        message=format_question(name, action.help, default),
+        kind=QuestionKind.SINGLE_CHOICE,
+        default=default,
+        choices=names,
+        cast=str,
+        help=action.help or None,
+    )
+
+
 def not_none(x: Optional[Any]):
     return x is not None
