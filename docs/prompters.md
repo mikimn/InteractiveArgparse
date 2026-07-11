@@ -34,7 +34,7 @@ args = build_parser().parse_args()
 
 `RichPrompter` maps each `QuestionKind` to the matching `rich.prompt` class: `TEXT` → `Prompt`, `INT` → `IntPrompt`, `FLOAT` → `FloatPrompt`, `CONFIRM` → `Confirm`, `SINGLE_CHOICE` → `Prompt` with `choices=`. `rich.prompt` has no native multi-select control, so `MULTI_CHOICE` questions (including ones with fixed `choices`) fall back to a single free-text prompt, split on commas/whitespace into a list.
 
-See [`examples/rich.py`](../examples/rich.py) for a complete, runnable version of the example above.
+See [`examples/rich_prompter.py`](../examples/rich_prompter.py) for a complete, runnable version of the example above.
 
 ## Using `WebPrompter`
 
