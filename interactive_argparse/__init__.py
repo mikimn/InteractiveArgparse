@@ -5,5 +5,6 @@ from .parse import (
     PyInquirerPrompter,
     Question,
     QuestionKind,
+    RichPrompter,
     WebPrompter,
 )

@@ -44,9 +44,9 @@ Running this script without arguments results in interactive prompts like so:
 
 ## Prompters
 
-Terminal prompts are just the default — `InteractiveArgumentParser` can be pointed at a completely different interactive flow via its `prompter` argument, including an auto-generated web form (`WebPrompter`) or your own custom `Prompter` subclass.
+`InteractiveArgumentParser` can be pointed at a completely different interactive flow via its `prompter` argument: a `rich`-based terminal prompter (`RichPrompter`), an auto-generated web form (`WebPrompter`), or your own custom `Prompter` subclass.
 
-See [docs/prompters.md](docs/prompters.md) for how to use the built-in web prompter and how to write your own.
+See [docs/prompters.md](docs/prompters.md) for how to use the built-in prompters and how to write your own.
 
 ## Development
 

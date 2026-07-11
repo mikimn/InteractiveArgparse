@@ -7,9 +7,34 @@
 | Prompter | Registered name | Renders as | Extra dependency |
 | --- | --- | --- | --- |
 | `PyInquirerPrompter` | `"pyinquirer"` | Terminal prompts (the default) | none (bundled) |
+| `RichPrompter` | `"rich"` | Terminal prompts via [`rich.prompt`](https://rich.readthedocs.io/en/stable/prompt.html) | none (bundled) |
 | `WebPrompter` | `"web"` | An auto-generated web form, opened in your browser | `pip install InteractiveArgparse[web]` |
 
-Both are `interactive_argparse.Prompter` subclasses and are only imported lazily, the first time they're actually used — so picking one doesn't force the other's dependencies on you.
+All three are `interactive_argparse.Prompter` subclasses. `WebPrompter` is only imported lazily, the first time it's actually used, so picking a terminal prompter doesn't force its dependencies on you.
+
+## Using `RichPrompter`
+
+`rich` is already a bundled dependency (used to build a maintained terminal prompt without PyInquirer's `prompt_toolkit<2.0` pin and `collections.Mapping` compat shim), so no extra install is needed:
+
+```python
+from interactive_argparse import interactive
+
+
+@interactive("rich")
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", help="The user's name.")
+    parser.add_argument("--should_greet", help="Whether or not I should greet the user", action="store_true")
+    parser.add_argument("--color", help="A favorite color", choices=["red", "green", "blue"])
+    return parser
+
+
+args = build_parser().parse_args()
+```
+
+`RichPrompter` maps each `QuestionKind` to the matching `rich.prompt` class: `TEXT` → `Prompt`, `INT` → `IntPrompt`, `FLOAT` → `FloatPrompt`, `CONFIRM` → `Confirm`, `SINGLE_CHOICE` → `Prompt` with `choices=`. `rich.prompt` has no native multi-select control, so `MULTI_CHOICE` questions (including ones with fixed `choices`) fall back to a single free-text prompt, split on commas/whitespace into a list.
+
+See [`examples/rich.py`](../examples/rich.py) for a complete, runnable version of the example above.
 
 ## Using `WebPrompter`
 
