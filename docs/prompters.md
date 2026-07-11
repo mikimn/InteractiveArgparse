@@ -2,6 +2,8 @@
 
 `InteractiveArgumentParser` doesn't know how to render questions itself — that job belongs to a **prompter**: a callable that takes the list of questions built from your `ArgumentParser` and returns the user's answers. By default it uses [PyInquirer](https://github.com/CITGuru/PyInquirer) to prompt in the terminal, but you can plug in a completely different interactive flow — for example, a web form.
 
+> `PyInquirer` is unmaintained; see [ADR 0001](decisions/0001-default-terminal-prompter.md) for a comparison of alternatives (including `RichPrompter` below) and the plan for eventually changing the default.
+
 ## Built-in prompters
 
 | Prompter | Registered name | Renders as | Extra dependency |
