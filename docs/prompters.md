@@ -136,3 +136,9 @@ Each `Question` describes one argument, independent of any particular UI:
 | `cast` | `Optional[Callable]` | Do **not** call this yourself — `InteractiveArgumentParser` applies it to whatever raw value your prompter returns, so every prompter gets correct type coercion for free. Just return the most natural value for your UI (e.g. a raw string from a text field). |
 
 Return raw answers — don't apply `cast` yourself, and don't worry about stringifying `default`/`choices` for display; format them however your UI needs.
+
+### What happens when `cast` fails
+
+If a prompter doesn't validate its own input (e.g. a plain text field accepting anything for an `int`-typed argument), `InteractiveArgumentParser` catches the `ValueError`/`TypeError` `cast` raises instead of letting it crash the program. It re-invokes your prompter with just that one `Question` — the same `__call__(questions: List[Question])` interface, just with a single-element list — so you don't need any special handling for this case. The retried `Question`'s `message` is amended with what went wrong and a prompt to try again; if your prompter uses `help` instead of `message` for its own layout, it won't see that context, so consider surfacing cast errors yourself if that matters for your UI.
+
+This repeats up to 3 times total. If your prompter returns an empty `{}` on that call (its usual way of signaling the user cancelled), parsing exits the same way a top-level cancellation does. If every attempt still fails to cast, `InteractiveArgumentParser` reports a normal argparse usage error (via the wrapped parser's own `.error(...)`, printing usage and exiting with status 2) instead of raising a raw exception.

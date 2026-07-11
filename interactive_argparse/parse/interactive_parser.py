@@ -2,6 +2,7 @@ import functools
 import os
 import sys
 from argparse import ArgumentParser, Namespace, SUPPRESS
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .prompter import Prompter
@@ -25,6 +26,12 @@ def _resolve_prompter(name: str, source: str = "prompter") -> Prompter:
 
 
 class InteractiveArgumentParser:
+    #: How many times a single question is re-asked after its answer fails
+    #: to `cast` (e.g. typing "abc" for an int-typed argument), before giving
+    #: up and reporting a usage error instead of crashing with a raw
+    #: ValueError/TypeError traceback.
+    _MAX_CAST_ATTEMPTS = 3
+
     def __init__(
             self,
             base_parser: ArgumentParser,
@@ -121,14 +128,44 @@ class InteractiveArgumentParser:
             # Cancelled by user
             exit()
 
-        casts = {question.name: question.cast for question in questions}
+        questions_by_name = {question.name: question for question in questions}
         for key, value in answers.items():
-            cast = casts.get(key)
-            if cast is not None:
-                value = cast(value)
+            question = questions_by_name.get(key)
+            if question is not None and question.cast is not None:
+                value = self._cast_answer(question, value)
             setattr(namespace, key, value)
         self._namespace = Namespace(**namespace.__dict__.copy())
         return namespace, []
+
+    def _cast_answer(self, question: Question, value: Any) -> Any:
+        """Applies `question.cast` to `value`, re-prompting just this one
+        question (up to `_MAX_CAST_ATTEMPTS` times total) if casting fails -
+        e.g. a plain-text prompter letting someone type "abc" for an
+        int-typed argument. Gives up with a normal argparse usage error
+        (via `self._base_parser.error`, same as an invalid value passed on
+        the real command line) rather than letting the raw ValueError/
+        TypeError crash the program.
+        """
+        last_error: Optional[Exception] = None
+        for attempt in range(self._MAX_CAST_ATTEMPTS):
+            try:
+                return question.cast(value)
+            except (TypeError, ValueError) as exc:
+                last_error = exc
+                if attempt == self._MAX_CAST_ATTEMPTS - 1:
+                    break
+                retry_question = replace(
+                    question,
+                    message=f"Invalid value {value!r} for {question.name} ({exc}) - please try again. {question.message}",
+                )
+                retry_answers = self._prompter([retry_question])
+                if not retry_answers:
+                    # Cancelled by user
+                    exit()
+                value = retry_answers[question.name]
+        self._base_parser.error(
+            f"invalid value {value!r} for {question.name!r} after {self._MAX_CAST_ATTEMPTS} attempts: {last_error}"
+        )
 
 
 def interactive(prompter: Union[Callable[..., ArgumentParser], str, None] = None):

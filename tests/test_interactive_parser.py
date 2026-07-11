@@ -310,3 +310,65 @@ class TestDefaultPrompterEnvVar:
         fake = FakePrompter({})
         parser = InteractiveArgumentParser(argparse.ArgumentParser(), prompter=fake)
         assert parser._prompter is fake
+
+
+class _FlakyPrompter(Prompter):
+    """Returns a canned answer dict per call, in order - lets a test drive a
+    prompter through an invalid answer, followed by a corrected one (or
+    another invalid one, or a cancellation), without any real terminal
+    interaction.
+    """
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def __call__(self, questions):
+        self.calls.append(questions)
+        return self.responses.pop(0)
+
+
+class TestCastErrorHandling:
+    @staticmethod
+    def _build_parser(prompter):
+        parser = argparse.ArgumentParser(prog="prog")
+        parser.add_argument("--count", type=int, default=1)
+        return InteractiveArgumentParser(parser, prompter=prompter)
+
+    def test_invalid_answer_re_prompts_and_succeeds_with_corrected_value(self):
+        prompter = _FlakyPrompter([
+            {"count": "abc"},
+            {"count": "5"},
+        ])
+        namespace = self._build_parser(prompter).parse_args([])
+        assert namespace.count == 5
+        assert len(prompter.calls) == 2
+        # The retry only re-asks the one question that failed to cast.
+        assert len(prompter.calls[1]) == 1
+        assert prompter.calls[1][0].name == "count"
+
+    def test_repeatedly_invalid_answer_exhausts_retries_and_reports_usage_error(self, capsys):
+        prompter = _FlakyPrompter([
+            {"count": "abc"},
+            {"count": "def"},
+            {"count": "ghi"},
+        ])
+        with pytest.raises(SystemExit):
+            self._build_parser(prompter).parse_args([])
+        assert len(prompter.calls) == 3
+        stderr = capsys.readouterr().err
+        assert "count" in stderr
+        assert "invalid value" in stderr
+
+    def test_cancelling_during_a_retry_exits_cleanly(self):
+        prompter = _FlakyPrompter([
+            {"count": "abc"},
+            {},  # cancelled
+        ])
+        with pytest.raises(SystemExit):
+            self._build_parser(prompter).parse_args([])
+
+    def test_valid_answer_is_not_re_prompted(self):
+        prompter = _FlakyPrompter([{"count": "7"}])
+        namespace = self._build_parser(prompter).parse_args([])
+        assert namespace.count == 7
+        assert len(prompter.calls) == 1
