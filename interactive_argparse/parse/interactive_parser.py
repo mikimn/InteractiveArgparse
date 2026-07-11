@@ -1,4 +1,5 @@
 import functools
+import json
 import os
 import sys
 from argparse import ArgumentParser, Namespace, SUPPRESS
@@ -38,6 +39,7 @@ class InteractiveArgumentParser:
             prompter: Optional[Callable[[List[Question]], Dict[str, Any]]] = None,
             interactive_flag: str = "interactive",
             enable_by_default=True,
+            persist_answers: Union[bool, str] = False,
     ) -> None:
         super().__init__()
         if base_parser is None:
@@ -51,6 +53,7 @@ class InteractiveArgumentParser:
         self._enable_by_default = enable_by_default
         self._flag_dest = f"no_{self._interactive_flag}" if enable_by_default else self._interactive_flag
         self._flag_option = f"--{self._flag_dest}"
+        self._answers_path = self._resolve_answers_path(persist_answers)
         self._init_interactive_parser()
 
     @staticmethod
@@ -59,6 +62,31 @@ class InteractiveArgumentParser:
         if not prompter_name:
             return PyInquirerPrompter()
         return _resolve_prompter(prompter_name, source=f"{PROMPTER_ENV_VAR} value")
+
+    def _resolve_answers_path(self, persist_answers: Union[bool, str]) -> Optional[str]:
+        if not persist_answers:
+            return None
+        if persist_answers is True:
+            return f".{self._base_parser.prog}.interactive_argparse_answers.json"
+        return str(persist_answers)
+
+    def _load_persisted_answers(self) -> Dict[str, Any]:
+        if self._answers_path is None:
+            return {}
+        try:
+            with open(self._answers_path) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            # Missing, unreadable, or corrupt - degrade to static defaults.
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _persist_answers(self, namespace: Namespace, questions: List[Question]) -> None:
+        if self._answers_path is None:
+            return
+        data = {q.name: getattr(namespace, q.name) for q in questions if hasattr(namespace, q.name)}
+        with open(self._answers_path, "w") as f:
+            json.dump(data, f)
 
     # Proxy
     def __getattr__(self, attr):
@@ -122,6 +150,15 @@ class InteractiveArgumentParser:
             if action.dest != self._flag_dest
         ]
         questions = list(filter(not_none, questions))
+
+        persisted_answers = self._load_persisted_answers()
+        if persisted_answers:
+            questions = [
+                replace(question, default=persisted_answers[question.name])
+                if question.name in persisted_answers else question
+                for question in questions
+            ]
+
         answers = self._prompter(questions)
 
         if len(answers) == 0 and len(questions) > 0:
@@ -135,6 +172,7 @@ class InteractiveArgumentParser:
                 value = self._cast_answer(question, value)
             setattr(namespace, key, value)
         self._namespace = Namespace(**namespace.__dict__.copy())
+        self._persist_answers(namespace, questions)
         return namespace, []
 
     def _cast_answer(self, question: Question, value: Any) -> Any:

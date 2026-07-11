@@ -1,4 +1,5 @@
 import argparse
+import json
 
 import pytest
 
@@ -372,3 +373,78 @@ class TestCastErrorHandling:
         namespace = self._build_parser(prompter).parse_args([])
         assert namespace.count == 7
         assert len(prompter.calls) == 1
+
+
+class TestPersistAnswers:
+    @staticmethod
+    def _build_parser(path, prompter, prog="prog"):
+        parser = argparse.ArgumentParser(prog=prog)
+        parser.add_argument("--count", type=int, default=1)
+        return InteractiveArgumentParser(parser, prompter=prompter, persist_answers=path)
+
+    def test_disabled_by_default_does_not_write_a_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        parser = argparse.ArgumentParser(prog="prog")
+        parser.add_argument("--count", type=int, default=1)
+        iparser = InteractiveArgumentParser(parser, prompter=FakePrompter({"count": 5}))
+        iparser.parse_args([])
+        assert list(tmp_path.iterdir()) == []
+
+    def test_first_run_writes_answers_file(self, tmp_path):
+        answers_path = tmp_path / "answers.json"
+        namespace = self._build_parser(str(answers_path), FakePrompter({"count": 5})).parse_args([])
+        assert namespace.count == 5
+        assert answers_path.exists()
+        assert json.loads(answers_path.read_text()) == {"count": 5}
+
+    def test_second_run_reads_back_and_prefills_default(self, tmp_path):
+        answers_path = tmp_path / "answers.json"
+        answers_path.write_text(json.dumps({"count": 42}))
+
+        # An empty FakePrompter mapping falls back to each Question's
+        # `default` - so if the persisted value round-trips into `default`,
+        # the resulting namespace carries it through untouched.
+        fake = FakePrompter({})
+        namespace = self._build_parser(str(answers_path), fake).parse_args([])
+        assert namespace.count == 42
+        assert fake.questions[0].default == 42
+
+    def test_persisted_default_does_not_change_the_static_action_default(self, tmp_path):
+        answers_path = tmp_path / "answers.json"
+        answers_path.write_text(json.dumps({"count": 42}))
+
+        parser = argparse.ArgumentParser(prog="prog")
+        parser.add_argument("--count", type=int, default=1)
+        iparser = InteractiveArgumentParser(parser, prompter=FakePrompter({}), persist_answers=str(answers_path))
+        iparser.parse_args([])
+
+        count_action = next(a for a in parser._actions if a.dest == "count")
+        assert count_action.default == 1
+
+    def test_missing_file_degrades_to_static_default(self, tmp_path):
+        answers_path = tmp_path / "does_not_exist.json"
+        namespace = self._build_parser(str(answers_path), FakePrompter({})).parse_args([])
+        assert namespace.count == 1
+
+    def test_corrupt_file_degrades_to_static_default(self, tmp_path):
+        answers_path = tmp_path / "answers.json"
+        answers_path.write_text("{not valid json")
+        namespace = self._build_parser(str(answers_path), FakePrompter({})).parse_args([])
+        assert namespace.count == 1
+
+    def test_non_dict_json_degrades_to_static_default(self, tmp_path):
+        answers_path = tmp_path / "answers.json"
+        answers_path.write_text(json.dumps([1, 2, 3]))
+        namespace = self._build_parser(str(answers_path), FakePrompter({})).parse_args([])
+        assert namespace.count == 1
+
+    def test_persist_answers_true_derives_a_filename_from_prog(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        parser = argparse.ArgumentParser(prog="myscript")
+        parser.add_argument("--count", type=int, default=1)
+        iparser = InteractiveArgumentParser(parser, prompter=FakePrompter({"count": 9}), persist_answers=True)
+        iparser.parse_args([])
+
+        expected_path = tmp_path / ".myscript.interactive_argparse_answers.json"
+        assert expected_path.exists()
+        assert json.loads(expected_path.read_text()) == {"count": 9}

@@ -10,6 +10,7 @@
 * [Usage](#usage)
 * [Features](#features)
 * [Prompters](#prompters)
+* [Persisting answers across runs](#persisting-answers-across-runs)
 
 ## Installation
 To install, run
@@ -47,6 +48,12 @@ Running this script without arguments results in interactive prompts like so:
 `InteractiveArgumentParser` can be pointed at a completely different interactive flow via its `prompter` argument: a `rich`-based terminal prompter (`RichPrompter`), an auto-generated web form (`WebPrompter`), or your own custom `Prompter` subclass.
 
 See [docs/prompters.md](docs/prompters.md) for how to use the built-in prompters and how to write your own.
+
+## Persisting answers across runs
+
+`InteractiveArgumentParser(parser, persist_answers=True)` remembers what you answered last time and pre-fills it as the new default on the next run — handy when you re-run the same script repeatedly during development. Off by default.
+
+See [docs/persistence.md](docs/persistence.md) for details.
 
 ## Development
 
