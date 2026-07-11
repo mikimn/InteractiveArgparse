@@ -29,6 +29,11 @@ jobs:
             echo "::error::Tag v${{ inputs.version }} already exists"
             exit 1
           fi
+          current_version=$(sed -n 's/^version = //p' setup.cfg)
+          if [ "${{ inputs.version }}" = "$current_version" ]; then
+            echo "::error::setup.cfg is already at version $current_version - nothing to bump. Pick a new version."
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
