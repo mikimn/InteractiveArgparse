@@ -1,7 +1,7 @@
 # InteractiveArgparse
 ![Coverage](docs/assets/coverage.svg)
 ![Build Status](https://github.com/mikimn/InteractiveArgparse/actions/workflows/python-package.yml/badge.svg)
-![PyPI version](https://badge.fury.io/py/InteractiveArgparse.svg)
+[![PyPI version](https://badge.fury.io/py/InteractiveArgparse.svg)](https://badge.fury.io/py/InteractiveArgparse)
 
 ## Table of Contents
 
