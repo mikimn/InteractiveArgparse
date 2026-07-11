@@ -71,3 +71,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "v${{ inputs.version }}" --title "v${{ inputs.version }}" --generate-notes
+
+      # Publishing here directly, rather than relying on python-publish.yml's
+      # `on: release: created` trigger, because GitHub Actions does not let
+      # a workflow run authenticated as the default GITHUB_TOKEN (as the
+      # release creation above is) trigger other workflows - that trigger
+      # only fires for releases a human creates by hand, e.g. via the web UI.
+      - name: Build package
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: twine upload dist/*
