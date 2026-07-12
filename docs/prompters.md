@@ -12,8 +12,6 @@
 | `RichPrompter` | `"rich"` | Terminal prompts via [`rich.prompt`](https://rich.readthedocs.io/en/stable/prompt.html) | none (bundled) |
 | `WebPrompter` | `"web"` | An auto-generated web form, opened in your browser | `pip install InteractiveArgparse[web]` |
 
-All three are `interactive_argparse.Prompter` subclasses. `WebPrompter` is only imported lazily, the first time it's actually used, so picking a terminal prompter doesn't force its dependencies on you.
-
 ## Using `RichPrompter`
 
 `rich` is already a bundled dependency (used to build a maintained terminal prompt without PyInquirer's `prompt_toolkit<2.0` pin and `collections.Mapping` compat shim), so no extra install is needed:
@@ -34,7 +32,7 @@ def build_parser():
 args = build_parser().parse_args()
 ```
 
-`RichPrompter` maps each `QuestionKind` to the matching `rich.prompt` class: `TEXT` → `Prompt`, `INT` → `IntPrompt`, `FLOAT` → `FloatPrompt`, `CONFIRM` → `Confirm`, `SINGLE_CHOICE` → `Prompt` with `choices=`. `rich.prompt` has no native multi-select control, so `MULTI_CHOICE` questions (including ones with fixed `choices`) fall back to a single free-text prompt, split on commas/whitespace into a list.
+`rich.prompt` has no native multi-select control, so a `MULTI_CHOICE` question (e.g. `nargs="+"`) falls back to a free-text prompt, split on commas/whitespace into a list — values are still checked against `choices=` if the argument has any, with a re-prompt on an invalid entry.
 
 See [`examples/rich_prompter.py`](../examples/rich_prompter.py) for a complete, runnable version of the example above.
 

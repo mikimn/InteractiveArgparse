@@ -1,5 +1,6 @@
 import argparse
 import json
+import pathlib
 
 import pytest
 
@@ -295,6 +296,22 @@ class TestDefaultPrompterEnvVar:
         with pytest.raises(ValueError):
             InteractiveArgumentParser._build_default_prompter()
 
+    def test_env_var_with_incidental_whitespace_is_stripped(self, monkeypatch):
+        class _EnvWhitespacePrompter(Prompter):
+            name = "env_whitespace_test_prompter"
+
+            def __call__(self, questions):
+                return {q.name: q.default for q in questions}
+
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "  env_whitespace_test_prompter\n")
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, _EnvWhitespacePrompter)
+
+    def test_env_var_set_to_only_whitespace_falls_back_to_pyinquirer(self, monkeypatch):
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "   ")
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, PyInquirerPrompter)
+
     def test_constructor_uses_env_var_when_no_prompter_passed_explicitly(self, monkeypatch):
         class _EnvDummyPrompter2(Prompter):
             name = "env_dummy_test_prompter_2"
@@ -367,6 +384,22 @@ class TestCastErrorHandling:
         ])
         with pytest.raises(SystemExit):
             self._build_parser(prompter).parse_args([])
+
+    def test_retry_answer_missing_the_expected_key_reports_usage_error(self, capsys):
+        # A malformed prompter that returns a non-empty dict on retry, but
+        # without the one key that was actually asked for - must not raise
+        # a raw KeyError, and must still report the same usage error as
+        # exhausted retries.
+        prompter = _FlakyPrompter([
+            {"count": "abc"},
+            {"unrelated_key": "5"},
+        ])
+        with pytest.raises(SystemExit):
+            self._build_parser(prompter).parse_args([])
+        assert len(prompter.calls) == 2
+        stderr = capsys.readouterr().err
+        assert "count" in stderr
+        assert "invalid value" in stderr
 
     def test_valid_answer_is_not_re_prompted(self):
         prompter = _FlakyPrompter([{"count": "7"}])
@@ -448,3 +481,22 @@ class TestPersistAnswers:
         expected_path = tmp_path / ".myscript.interactive_argparse_answers.json"
         assert expected_path.exists()
         assert json.loads(expected_path.read_text()) == {"count": 9}
+
+    def test_non_serializable_answer_does_not_crash_and_persists_the_rest(self, tmp_path):
+        # A custom type= (or a prompter that resolves to real objects, not
+        # just strings) can produce an answer json.dump can't serialize -
+        # this must not crash an otherwise-successful parse_args() call, or
+        # take down every other persisted answer along with it.
+        answers_path = tmp_path / "answers.json"
+        parser = argparse.ArgumentParser(prog="prog")
+        parser.add_argument("--count", type=int, default=1)
+        parser.add_argument("--path", type=pathlib.Path, default=None)
+        prompter = FakePrompter({"count": 5, "path": pathlib.Path("/tmp/x")})
+        iparser = InteractiveArgumentParser(parser, prompter=prompter, persist_answers=str(answers_path))
+
+        namespace = iparser.parse_args([])
+
+        assert namespace.count == 5
+        assert namespace.path == pathlib.Path("/tmp/x")
+        assert answers_path.exists()
+        assert json.loads(answers_path.read_text()) == {"count": 5}
