@@ -85,8 +85,24 @@ class InteractiveArgumentParser:
         if self._answers_path is None:
             return
         data = {q.name: getattr(namespace, q.name) for q in questions if hasattr(namespace, q.name)}
+        try:
+            serialized = json.dumps(data)
+        except TypeError:
+            # A non-JSON-serializable answer (e.g. type=pathlib.Path, or any
+            # custom type=/cast returning an object rather than a primitive)
+            # shouldn't crash an otherwise-successful parse_args() call, or
+            # lose every other persisted answer along with it - drop just
+            # the offending ones.
+            serializable_data = {}
+            for key, value in data.items():
+                try:
+                    json.dumps(value)
+                except TypeError:
+                    continue
+                serializable_data[key] = value
+            serialized = json.dumps(serializable_data)
         with open(self._answers_path, "w") as f:
-            json.dump(data, f)
+            f.write(serialized)
 
     # Proxy
     def __getattr__(self, attr):

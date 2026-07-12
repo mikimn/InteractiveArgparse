@@ -1,5 +1,6 @@
 import argparse
 import json
+import pathlib
 
 import pytest
 
@@ -480,3 +481,22 @@ class TestPersistAnswers:
         expected_path = tmp_path / ".myscript.interactive_argparse_answers.json"
         assert expected_path.exists()
         assert json.loads(expected_path.read_text()) == {"count": 9}
+
+    def test_non_serializable_answer_does_not_crash_and_persists_the_rest(self, tmp_path):
+        # A custom type= (or a prompter that resolves to real objects, not
+        # just strings) can produce an answer json.dump can't serialize -
+        # this must not crash an otherwise-successful parse_args() call, or
+        # take down every other persisted answer along with it.
+        answers_path = tmp_path / "answers.json"
+        parser = argparse.ArgumentParser(prog="prog")
+        parser.add_argument("--count", type=int, default=1)
+        parser.add_argument("--path", type=pathlib.Path, default=None)
+        prompter = FakePrompter({"count": 5, "path": pathlib.Path("/tmp/x")})
+        iparser = InteractiveArgumentParser(parser, prompter=prompter, persist_answers=str(answers_path))
+
+        namespace = iparser.parse_args([])
+
+        assert namespace.count == 5
+        assert namespace.path == pathlib.Path("/tmp/x")
+        assert answers_path.exists()
+        assert json.loads(answers_path.read_text()) == {"count": 5}

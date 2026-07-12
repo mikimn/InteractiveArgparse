@@ -36,3 +36,5 @@ See [`examples/persist_answers.py`](../examples/persist_answers.py) for a comple
 ## Failure handling
 
 If the file is missing (first run) or unreadable/corrupt (not valid JSON, or valid JSON that isn't an object), it's treated as if no answers were persisted yet — every argument falls back to its static default, exactly like `persist_answers=False`. Nothing raises for a missing or corrupt file; only a failure to *write* the file (e.g. an unwritable directory) propagates as a normal `OSError`, since at that point you've explicitly opted into persistence and would want to know it's not working.
+
+An answer that isn't JSON-serializable (e.g. a custom `type=` returning an object rather than a primitive) is dropped from what gets persisted rather than crashing an otherwise-successful `parse_args()` call or losing every other answer along with it - everything else is still written normally.
