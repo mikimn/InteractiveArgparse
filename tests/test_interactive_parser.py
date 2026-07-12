@@ -295,6 +295,22 @@ class TestDefaultPrompterEnvVar:
         with pytest.raises(ValueError):
             InteractiveArgumentParser._build_default_prompter()
 
+    def test_env_var_with_incidental_whitespace_is_stripped(self, monkeypatch):
+        class _EnvWhitespacePrompter(Prompter):
+            name = "env_whitespace_test_prompter"
+
+            def __call__(self, questions):
+                return {q.name: q.default for q in questions}
+
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "  env_whitespace_test_prompter\n")
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, _EnvWhitespacePrompter)
+
+    def test_env_var_set_to_only_whitespace_falls_back_to_pyinquirer(self, monkeypatch):
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "   ")
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, PyInquirerPrompter)
+
     def test_constructor_uses_env_var_when_no_prompter_passed_explicitly(self, monkeypatch):
         class _EnvDummyPrompter2(Prompter):
             name = "env_dummy_test_prompter_2"
@@ -367,6 +383,22 @@ class TestCastErrorHandling:
         ])
         with pytest.raises(SystemExit):
             self._build_parser(prompter).parse_args([])
+
+    def test_retry_answer_missing_the_expected_key_reports_usage_error(self, capsys):
+        # A malformed prompter that returns a non-empty dict on retry, but
+        # without the one key that was actually asked for - must not raise
+        # a raw KeyError, and must still report the same usage error as
+        # exhausted retries.
+        prompter = _FlakyPrompter([
+            {"count": "abc"},
+            {"unrelated_key": "5"},
+        ])
+        with pytest.raises(SystemExit):
+            self._build_parser(prompter).parse_args([])
+        assert len(prompter.calls) == 2
+        stderr = capsys.readouterr().err
+        assert "count" in stderr
+        assert "invalid value" in stderr
 
     def test_valid_answer_is_not_re_prompted(self):
         prompter = _FlakyPrompter([{"count": "7"}])
