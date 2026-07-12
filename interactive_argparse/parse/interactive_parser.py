@@ -55,7 +55,7 @@ class InteractiveArgumentParser:
 
     @staticmethod
     def _build_default_prompter() -> Prompter:
-        prompter_name = os.environ.get(PROMPTER_ENV_VAR)
+        prompter_name = (os.environ.get(PROMPTER_ENV_VAR) or "").strip()
         if not prompter_name:
             return PyInquirerPrompter()
         return _resolve_prompter(prompter_name, source=f"{PROMPTER_ENV_VAR} value")

@@ -46,6 +46,22 @@ Running this script without arguments results in interactive prompts like so:
 
 `InteractiveArgumentParser` can be pointed at a completely different interactive flow via its `prompter` argument: a `rich`-based terminal prompter (`RichPrompter`), an auto-generated web form (`WebPrompter`), or your own custom `Prompter` subclass.
 
+```python
+from interactive_argparse import interactive
+
+
+@interactive("rich")
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", help="The user's name.")
+    return parser
+
+
+args = build_parser().parse_args()
+```
+
+<!-- TODO: add a screenshot of RichPrompter here, like example1.png above. -->
+
 See [docs/prompters.md](docs/prompters.md) for how to use the built-in prompters and how to write your own.
 
 ## Development

@@ -294,6 +294,22 @@ class TestDefaultPrompterEnvVar:
         with pytest.raises(ValueError):
             InteractiveArgumentParser._build_default_prompter()
 
+    def test_env_var_with_incidental_whitespace_is_stripped(self, monkeypatch):
+        class _EnvWhitespacePrompter(Prompter):
+            name = "env_whitespace_test_prompter"
+
+            def __call__(self, questions):
+                return {q.name: q.default for q in questions}
+
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "  env_whitespace_test_prompter\n")
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, _EnvWhitespacePrompter)
+
+    def test_env_var_set_to_only_whitespace_falls_back_to_pyinquirer(self, monkeypatch):
+        monkeypatch.setenv(PROMPTER_ENV_VAR, "   ")
+        prompter = InteractiveArgumentParser._build_default_prompter()
+        assert isinstance(prompter, PyInquirerPrompter)
+
     def test_constructor_uses_env_var_when_no_prompter_passed_explicitly(self, monkeypatch):
         class _EnvDummyPrompter2(Prompter):
             name = "env_dummy_test_prompter_2"

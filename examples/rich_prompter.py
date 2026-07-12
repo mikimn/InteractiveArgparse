@@ -1,7 +1,4 @@
 import argparse
-import os
-import sys
-sys.path.append(os.getcwd())
 from interactive_argparse import interactive
 
 
