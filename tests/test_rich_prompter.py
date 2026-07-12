@@ -100,3 +100,58 @@ class TestRichPrompterCall:
         question = Question(name="tags", message="m", kind=QuestionKind.MULTI_CHOICE, default=[])
         answers = RichPrompter()([question])
         assert answers == {"tags": []}
+
+    def test_multi_choice_without_fixed_choices_is_not_validated(self, monkeypatch):
+        # No question.choices set - free-form nargs="+" argument - so
+        # anything the user types is accepted as-is, same as before.
+        monkeypatch.setattr(Prompt, "ask", classmethod(lambda cls, **kwargs: "anything goes"))
+        question = Question(name="tags", message="m", kind=QuestionKind.MULTI_CHOICE, default=[])
+        answers = RichPrompter()([question])
+        assert answers == {"tags": ["anything", "goes"]}
+
+    def test_multi_choice_with_fixed_choices_accepts_valid_values_in_one_call(self, monkeypatch):
+        calls = []
+
+        def fake_ask(cls, **kwargs):
+            calls.append(kwargs)
+            return "a b"
+
+        monkeypatch.setattr(Prompt, "ask", classmethod(fake_ask))
+        question = Question(
+            name="tags", message="m", kind=QuestionKind.MULTI_CHOICE,
+            default=[], choices=["a", "b", "c"],
+        )
+        answers = RichPrompter()([question])
+        assert answers == {"tags": ["a", "b"]}
+        assert len(calls) == 1
+
+    def test_multi_choice_with_fixed_choices_reprompts_on_invalid_value(self, monkeypatch):
+        responses = iter(["a bogus", "a b"])
+
+        def fake_ask(cls, **kwargs):
+            return next(responses)
+
+        monkeypatch.setattr(Prompt, "ask", classmethod(fake_ask))
+        question = Question(
+            name="tags", message="m", kind=QuestionKind.MULTI_CHOICE,
+            default=[], choices=["a", "b", "c"],
+        )
+        answers = RichPrompter()([question])
+        assert answers == {"tags": ["a", "b"]}
+
+    def test_multi_choice_retry_message_mentions_the_invalid_value(self, monkeypatch):
+        responses = iter(["bogus", "a"])
+        seen_prompts = []
+
+        def fake_ask(cls, **kwargs):
+            seen_prompts.append(kwargs["prompt"])
+            return next(responses)
+
+        monkeypatch.setattr(Prompt, "ask", classmethod(fake_ask))
+        question = Question(
+            name="tags", message="Pick tags", kind=QuestionKind.MULTI_CHOICE,
+            default=[], choices=["a", "b"],
+        )
+        RichPrompter()([question])
+        assert seen_prompts[0] == "Pick tags"
+        assert "bogus" in seen_prompts[1]
