@@ -162,6 +162,12 @@ class InteractiveArgumentParser:
                 if not retry_answers:
                     # Cancelled by user
                     exit()
+                if question.name not in retry_answers:
+                    # Malformed prompter response (missing the one key we
+                    # asked for) - stop retrying and fall through to the
+                    # same usage-error path as exhausted attempts, instead
+                    # of a raw KeyError.
+                    break
                 value = retry_answers[question.name]
         self._base_parser.error(
             f"invalid value {value!r} for {question.name!r} after {self._MAX_CAST_ATTEMPTS} attempts: {last_error}"

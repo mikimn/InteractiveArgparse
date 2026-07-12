@@ -383,6 +383,22 @@ class TestCastErrorHandling:
         with pytest.raises(SystemExit):
             self._build_parser(prompter).parse_args([])
 
+    def test_retry_answer_missing_the_expected_key_reports_usage_error(self, capsys):
+        # A malformed prompter that returns a non-empty dict on retry, but
+        # without the one key that was actually asked for - must not raise
+        # a raw KeyError, and must still report the same usage error as
+        # exhausted retries.
+        prompter = _FlakyPrompter([
+            {"count": "abc"},
+            {"unrelated_key": "5"},
+        ])
+        with pytest.raises(SystemExit):
+            self._build_parser(prompter).parse_args([])
+        assert len(prompter.calls) == 2
+        stderr = capsys.readouterr().err
+        assert "count" in stderr
+        assert "invalid value" in stderr
+
     def test_valid_answer_is_not_re_prompted(self):
         prompter = _FlakyPrompter([{"count": "7"}])
         namespace = self._build_parser(prompter).parse_args([])
