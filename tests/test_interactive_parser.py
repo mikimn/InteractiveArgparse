@@ -543,3 +543,45 @@ class TestSubparsers:
 
         assert namespace.command == "run"
         assert namespace.speed == 7
+
+    def test_invalid_subcommand_answer_reports_usage_error_not_keyerror(self):
+        parser = argparse.ArgumentParser(prog="prog")
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("run")
+        subparsers.add_parser("stop")
+
+        # A misbehaving prompter (or a stale persisted default from a
+        # renamed/removed subcommand) returning a name that isn't actually
+        # registered must not raise a raw KeyError.
+        prompter = FakePrompter({"command": "does_not_exist"})
+        with pytest.raises(SystemExit):
+            InteractiveArgumentParser(parser, prompter=prompter).parse_args([])
+
+    def test_persist_answers_round_trips_the_chosen_subcommand(self, tmp_path):
+        answers_path = tmp_path / "answers.json"
+
+        def build_parser():
+            parser = argparse.ArgumentParser(prog="prog")
+            subparsers = parser.add_subparsers(dest="command")
+            subparsers.add_parser("run").add_argument("--speed", type=int, default=1)
+            subparsers.add_parser("stop")
+            return parser
+
+        first_prompter = FakePrompter({"command": "run", "speed": "5"})
+        first = InteractiveArgumentParser(
+            build_parser(), prompter=first_prompter, persist_answers=str(answers_path),
+        )
+        first.parse_args([])
+        assert json.loads(answers_path.read_text()) == {"command": "run", "speed": 5}
+
+        # Second run: an empty FakePrompter mapping falls back to each
+        # Question's `default` - so the persisted "command" must have been
+        # loaded back as the subcommand question's default too, not just
+        # "speed"'s.
+        second_prompter = FakePrompter({})
+        second = InteractiveArgumentParser(
+            build_parser(), prompter=second_prompter, persist_answers=str(answers_path),
+        )
+        namespace = second.parse_args([])
+        assert namespace.command == "run"
+        assert namespace.speed == 5

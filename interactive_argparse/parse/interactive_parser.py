@@ -167,7 +167,10 @@ class InteractiveArgumentParser:
             if question is not None and question.cast is not None:
                 value = self._cast_answer(question, value)
             setattr(namespace, key, value)
-        asked_questions.extend(q for q in questions if q is not subparsers_question)
+        # subparsers_question is included here (not excluded) so the chosen
+        # subcommand round-trips through persist_answers=True too, same as
+        # every other answer.
+        asked_questions.extend(questions)
 
         if subparsers_action is None or subparsers_question is None:
             return None
@@ -175,6 +178,16 @@ class InteractiveArgumentParser:
         chosen_name = answers.get(subparsers_question.name)
         if chosen_name is None:
             return None
+        if chosen_name not in subparsers_action.choices:
+            # Whatever the prompter returned for the subcommand question
+            # doesn't name a registered subcommand (a misbehaving custom
+            # prompter, or a stale persisted default from a renamed/removed
+            # subcommand) - report it the same way an invalid choice passed
+            # on the real command line would be, instead of a raw KeyError.
+            self._base_parser.error(
+                f"invalid choice for {subparsers_question.name!r}: {chosen_name!r} "
+                f"(choose from {sorted(subparsers_action.choices)})"
+            )
         if subparsers_action.dest != SUPPRESS:
             setattr(namespace, subparsers_action.dest, chosen_name)
 

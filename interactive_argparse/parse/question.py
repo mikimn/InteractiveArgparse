@@ -101,13 +101,18 @@ def _subparsers_action_to_question(action: _SubParsersAction) -> Optional[Questi
     if not action.choices:
         return None
     names = list(action.choices.keys())
-    default = action.default if action.default in names else names[0]
     name = action.dest if action.dest != SUPPRESS else "_subcommand"
+    # Passed through as-is, same as `_argparse_action_to_question`'s
+    # SINGLE_CHOICE handling - notably, `None` (the common case: no explicit
+    # `default=` given to `add_subparsers()`) is left as `None` rather than
+    # silently pre-selecting `names[0]`, which would otherwise make accepting
+    # the "default" on an unset subparser pick an arbitrary subcommand by
+    # registration order instead of forcing a deliberate choice.
     return Question(
         name=name,
-        message=format_question(name, action.help, default),
+        message=format_question(name, action.help, action.default),
         kind=QuestionKind.SINGLE_CHOICE,
-        default=default,
+        default=action.default,
         choices=names,
         cast=str,
         help=action.help or None,

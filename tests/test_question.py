@@ -113,13 +113,16 @@ class TestSubparsersActionToQuestion:
         assert question.name == "command"
         assert question.choices == ["run", "stop"]
 
-    def test_default_falls_back_to_first_choice_when_unset(self):
+    def test_default_is_none_when_unset_rather_than_first_choice(self):
+        # No explicit default= given to add_subparsers() is the common case
+        # - it must not be silently turned into a pre-selected subcommand by
+        # registration order, since that's not a deliberate choice.
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="command")
         subparsers.add_parser("run")
         subparsers.add_parser("stop")
         question = _subparsers_action_to_question(parser._actions[-1])
-        assert question.default == "run"
+        assert question.default is None
 
     def test_default_is_honored_when_it_is_a_valid_choice(self):
         parser = argparse.ArgumentParser()
