@@ -17,6 +17,13 @@ class RichPrompter(Prompter):
 
     _MULTI_CHOICE_SPLIT_RE = re.compile(r"[,\s]+")
 
+    #: How many times a MULTI_CHOICE question with fixed `choices` is
+    #: re-asked after an invalid answer, before giving up - mirrors
+    #: InteractiveArgumentParser._cast_answer's bounded-retry convention, so
+    #: a validation that can never be satisfied degrades to a clear error
+    #: instead of looping forever.
+    _MAX_MULTI_CHOICE_ATTEMPTS = 3
+
     _PROMPT_CLASSES = {
         QuestionKind.TEXT: Prompt,
         QuestionKind.INT: IntPrompt,
@@ -37,8 +44,13 @@ class RichPrompter(Prompter):
 
     def _ask_multi_choice(self, question: Question) -> List[str]:
         _, kwargs = self._to_rich_prompt(question)
-        valid_choices = set(question.choices) if question.choices else None
-        while True:
+        # question.choices preserves its original type (e.g. [1, 2, 3] for a
+        # type=int argument), but the split answer is always a list of raw
+        # strings - stringify so the comparison actually matches, same as
+        # the `choices=` passed to `Prompt.ask` for SINGLE_CHOICE above.
+        valid_choices = {str(c) for c in question.choices} if question.choices else None
+        invalid: List[str] = []
+        for attempt in range(self._MAX_MULTI_CHOICE_ATTEMPTS):
             raw = Prompt.ask(**kwargs)
             value = [v for v in self._MULTI_CHOICE_SPLIT_RE.split(raw.strip()) if v]
             if valid_choices is None:
@@ -46,6 +58,8 @@ class RichPrompter(Prompter):
             invalid = [v for v in value if v not in valid_choices]
             if not invalid:
                 return value
+            if attempt == self._MAX_MULTI_CHOICE_ATTEMPTS - 1:
+                break
             kwargs = {
                 **kwargs,
                 "prompt": (
@@ -53,6 +67,10 @@ class RichPrompter(Prompter):
                     f"choose from {sorted(valid_choices)}. {question.message}"
                 ),
             }
+        raise ValueError(
+            f"No valid value for {question.name!r} after {self._MAX_MULTI_CHOICE_ATTEMPTS} attempts "
+            f"(last invalid: {invalid})"
+        )
 
     @classmethod
     def _to_rich_prompt(cls, question: Question) -> Tuple[Type[PromptBase], Dict[str, Any]]:
