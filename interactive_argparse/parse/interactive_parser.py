@@ -103,9 +103,6 @@ class InteractiveArgumentParser:
         if namespace is None:
             namespace = Namespace()
 
-        persisted_answers = self._load_persisted_answers()
-        asked_questions: List[Question] = []
-
         # Each round handles one parser's own actions - the base parser
         # first, then (if it has a `_SubParsersAction`) whichever sub-parser
         # the user picks, and so on for any further nesting. This is what
@@ -114,13 +111,10 @@ class InteractiveArgumentParser:
         current_parser = self._base_parser
         exclude_dest = self._flag_dest
         while current_parser is not None:
-            current_parser = self._prompt_round(
-                current_parser, exclude_dest, namespace, asked_questions, persisted_answers,
-            )
+            current_parser = self._prompt_round(current_parser, exclude_dest, namespace)
             exclude_dest = None  # the --interactive/--no_interactive flag only exists on the base parser
 
         self._namespace = Namespace(**namespace.__dict__.copy())
-        self._persist_answers(namespace, asked_questions)
         return namespace, []
 
     def _prompt_round(
@@ -128,15 +122,12 @@ class InteractiveArgumentParser:
             parser: ArgumentParser,
             exclude_dest: Optional[str],
             namespace: Namespace,
-            asked_questions: List[Question],
-            persisted_answers: Dict[str, Any],
     ) -> Optional[ArgumentParser]:
         """Prompts for one parser's own actions - the base parser, or a
         previously-chosen subcommand's parser - applying answers into
-        `namespace` and extending `asked_questions` (for `_persist_answers`).
-        Returns the sub-parser to recurse into next if the user just chose
-        one via a `_SubParsersAction`, or `None` if there's nothing further
-        to prompt for.
+        `namespace`. Returns the sub-parser to recurse into next if the
+        user just chose one via a `_SubParsersAction`, or `None` if there's
+        nothing further to prompt for.
         """
         self._populate_namespace_defaults(namespace, parser)
 
@@ -151,6 +142,16 @@ class InteractiveArgumentParser:
             if action.dest != exclude_dest
         ]
         questions = list(filter(not_none, questions))
+
+        subparsers_question = None
+        if subparsers_action is not None:
+            subparsers_question = _subparsers_action_to_question(subparsers_action)
+            if subparsers_question is not None:
+                questions.append(subparsers_question)
+
+        if not questions:
+            return None
+
         answers = self._call_prompter(questions)
 
         if len(answers) == 0 and len(questions) > 0:
@@ -167,10 +168,6 @@ class InteractiveArgumentParser:
             if question is not None and question.cast is not None:
                 value = self._cast_answer(question, value)
             setattr(namespace, key, value)
-        # subparsers_question is included here (not excluded) so the chosen
-        # subcommand round-trips through persist_answers=True too, same as
-        # every other answer.
-        asked_questions.extend(questions)
 
         if subparsers_action is None or subparsers_question is None:
             return None

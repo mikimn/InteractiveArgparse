@@ -39,4 +39,3 @@ A few details worth knowing:
 - If `dest` was omitted (`add_subparsers()` with no `dest=`), `argparse` itself never stores the chosen subcommand name on the namespace — `InteractiveArgumentParser` matches that: the subcommand is still asked about (to know which arguments to prompt for next), just not written to the result.
 - If a subcommand has no arguments of its own (like `stop` above), nothing further is asked once it's chosen — your prompter is only ever called with a non-empty list of questions.
 - With no explicit `default=` on `add_subparsers()` (the common case), nothing is pre-selected — accepting a blank answer isn't possible; a subcommand must be actively chosen rather than one being silently picked by registration order.
-- With [`persist_answers=True`](persistence.md), the chosen subcommand is remembered and pre-filled as the shown default on the next run, the same as every other answer.
