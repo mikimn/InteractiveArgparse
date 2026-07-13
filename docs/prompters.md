@@ -7,9 +7,32 @@
 | Prompter | Registered name | Renders as | Extra dependency |
 | --- | --- | --- | --- |
 | `PyInquirerPrompter` | `"pyinquirer"` | Terminal prompts (the default) | none (bundled) |
+| `RichPrompter` | `"rich"` | Terminal prompts via [`rich.prompt`](https://rich.readthedocs.io/en/stable/prompt.html) | none (bundled) |
 | `WebPrompter` | `"web"` | An auto-generated web form, opened in your browser | `pip install InteractiveArgparse[web]` |
 
-Both are `interactive_argparse.Prompter` subclasses and are only imported lazily, the first time they're actually used — so picking one doesn't force the other's dependencies on you.
+## Using `RichPrompter`
+
+`rich` is already a bundled dependency (used to build a maintained terminal prompt without PyInquirer's `prompt_toolkit<2.0` pin and `collections.Mapping` compat shim), so no extra install is needed:
+
+```python
+from interactive_argparse import interactive
+
+
+@interactive("rich")
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", help="The user's name.")
+    parser.add_argument("--should_greet", help="Whether or not I should greet the user", action="store_true")
+    parser.add_argument("--color", help="A favorite color", choices=["red", "green", "blue"])
+    return parser
+
+
+args = build_parser().parse_args()
+```
+
+`rich.prompt` has no native multi-select control, so a `MULTI_CHOICE` question (e.g. `nargs="+"`) falls back to a free-text prompt, split on commas/whitespace into a list — values are still checked against `choices=` if the argument has any, with a re-prompt on an invalid entry (up to 3 attempts, then a clear error rather than prompting forever).
+
+See [`examples/rich_prompter.py`](../examples/rich_prompter.py) for a complete, runnable version of the example above.
 
 ## Using `WebPrompter`
 
@@ -101,3 +124,5 @@ Each `Question` describes one argument, independent of any particular UI:
 | `cast` | `Optional[Callable]` | Do **not** call this yourself — `InteractiveArgumentParser` applies it to whatever raw value your prompter returns, so every prompter gets correct type coercion for free. Just return the most natural value for your UI (e.g. a raw string from a text field). |
 
 Return raw answers — don't apply `cast` yourself, and don't worry about stringifying `default`/`choices` for display; format them however your UI needs.
+
+If your prompter does its own validation and gives up (e.g. a bounded retry loop, the way `RichPrompter` handles a `MULTI_CHOICE` question with a fixed set of `choices`), it's fine to raise a `ValueError` or `TypeError` instead of returning - `InteractiveArgumentParser` catches both and reports a normal argparse usage error, the same as any other unrecoverable answer.
