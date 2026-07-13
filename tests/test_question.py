@@ -2,7 +2,7 @@ import argparse
 import pathlib
 
 from interactive_argparse import QuestionKind
-from interactive_argparse.parse.question import _argparse_action_to_question
+from interactive_argparse.parse.question import _argparse_action_to_question, _subparsers_action_to_question
 
 
 class TestArgparseActionToQuestion:
@@ -100,3 +100,51 @@ class TestArgparseActionToQuestion:
         subparsers = parser.add_subparsers(dest="command")
         subparsers.add_parser("run")
         assert _argparse_action_to_question(parser._actions[-1]) is None
+
+
+class TestSubparsersActionToQuestion:
+    def test_builds_single_choice_question_over_subcommand_names(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("run")
+        subparsers.add_parser("stop")
+        question = _subparsers_action_to_question(parser._actions[-1])
+        assert question.kind == QuestionKind.SINGLE_CHOICE
+        assert question.name == "command"
+        assert question.choices == ["run", "stop"]
+
+    def test_default_is_none_when_unset_rather_than_first_choice(self):
+        # No explicit default= given to add_subparsers() is the common case
+        # - it must not be silently turned into a pre-selected subcommand by
+        # registration order, since that's not a deliberate choice.
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("run")
+        subparsers.add_parser("stop")
+        question = _subparsers_action_to_question(parser._actions[-1])
+        assert question.default is None
+
+    def test_default_is_honored_when_it_is_a_valid_choice(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("run")
+        subparsers.add_parser("stop")
+        action = parser._actions[-1]
+        action.default = "stop"
+        question = _subparsers_action_to_question(action)
+        assert question.default == "stop"
+
+    def test_uses_synthetic_name_when_dest_is_suppressed(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers()
+        subparsers.add_parser("run")
+        action = parser._actions[-1]
+        assert action.dest == argparse.SUPPRESS
+        question = _subparsers_action_to_question(action)
+        assert question.name == "_subcommand"
+
+    def test_returns_none_when_no_subcommands_registered(self):
+        parser = argparse.ArgumentParser()
+        parser.add_subparsers(dest="command")
+        action = parser._actions[-1]
+        assert _subparsers_action_to_question(action) is None

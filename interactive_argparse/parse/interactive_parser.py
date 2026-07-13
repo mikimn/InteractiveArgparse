@@ -1,13 +1,13 @@
 import functools
 import os
 import sys
-from argparse import ArgumentParser, Namespace, SUPPRESS
+from argparse import ArgumentParser, Namespace, SUPPRESS, _SubParsersAction
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .prompter import Prompter
 from .pyinquirer_prompter import PyInquirerPrompter
-from .question import Question, _argparse_action_to_question, not_none
+from .question import Question, _argparse_action_to_question, _subparsers_action_to_question, not_none
 
 #: If set, `InteractiveArgumentParser`'s default prompter (used whenever no
 #: `prompter=` is passed explicitly) is looked up by this name in
@@ -103,25 +103,55 @@ class InteractiveArgumentParser:
         if namespace is None:
             namespace = Namespace()
 
-        # add any action defaults that aren't present
-        actions = self._base_parser._actions
-        for action in actions:
-            if action.dest is not SUPPRESS:
-                if not hasattr(namespace, action.dest):
-                    if action.default is not SUPPRESS:
-                        setattr(namespace, action.dest, action.default)
+        # Each round handles one parser's own actions - the base parser
+        # first, then (if it has a `_SubParsersAction`) whichever sub-parser
+        # the user picks, and so on for any further nesting. This is what
+        # lets a chosen subcommand's own arguments be prompted for, since
+        # they aren't known until the subcommand itself is chosen.
+        current_parser = self._base_parser
+        exclude_dest = self._flag_dest
+        while current_parser is not None:
+            current_parser = self._prompt_round(current_parser, exclude_dest, namespace)
+            exclude_dest = None  # the --interactive/--no_interactive flag only exists on the base parser
 
-        # add any parser defaults that aren't present
-        for dest in self._defaults:
-            if not hasattr(namespace, dest):
-                setattr(namespace, dest, self._defaults[dest])
+        self._namespace = Namespace(**namespace.__dict__.copy())
+        return namespace, []
+
+    def _prompt_round(
+            self,
+            parser: ArgumentParser,
+            exclude_dest: Optional[str],
+            namespace: Namespace,
+    ) -> Optional[ArgumentParser]:
+        """Prompts for one parser's own actions - the base parser, or a
+        previously-chosen subcommand's parser - applying answers into
+        `namespace`. Returns the sub-parser to recurse into next if the
+        user just chose one via a `_SubParsersAction`, or `None` if there's
+        nothing further to prompt for.
+        """
+        self._populate_namespace_defaults(namespace, parser)
+
+        actions = parser._actions
+        subparsers_action = next(
+            (a for a in actions if isinstance(a, _SubParsersAction)), None
+        )
 
         questions = [
             _argparse_action_to_question(action)
             for action in actions
-            if action.dest != self._flag_dest
+            if action.dest != exclude_dest
         ]
         questions = list(filter(not_none, questions))
+
+        subparsers_question = None
+        if subparsers_action is not None:
+            subparsers_question = _subparsers_action_to_question(subparsers_action)
+            if subparsers_question is not None:
+                questions.append(subparsers_question)
+
+        if not questions:
+            return None
+
         answers = self._call_prompter(questions)
 
         if len(answers) == 0 and len(questions) > 0:
@@ -130,12 +160,49 @@ class InteractiveArgumentParser:
 
         questions_by_name = {question.name: question for question in questions}
         for key, value in answers.items():
+            if subparsers_question is not None and key == subparsers_question.name:
+                # Routing choice, applied separately below - not a real
+                # argument answer to cast/setattr generically.
+                continue
             question = questions_by_name.get(key)
             if question is not None and question.cast is not None:
                 value = self._cast_answer(question, value)
             setattr(namespace, key, value)
-        self._namespace = Namespace(**namespace.__dict__.copy())
-        return namespace, []
+
+        if subparsers_action is None or subparsers_question is None:
+            return None
+
+        chosen_name = answers.get(subparsers_question.name)
+        if chosen_name is None:
+            return None
+        if chosen_name not in subparsers_action.choices:
+            # Whatever the prompter returned for the subcommand question
+            # doesn't name a registered subcommand (a misbehaving custom
+            # prompter, or a stale persisted default from a renamed/removed
+            # subcommand) - report it the same way an invalid choice passed
+            # on the real command line would be, instead of a raw KeyError.
+            self._base_parser.error(
+                f"invalid choice for {subparsers_question.name!r}: {chosen_name!r} "
+                f"(choose from {sorted(subparsers_action.choices)})"
+            )
+        if subparsers_action.dest != SUPPRESS:
+            setattr(namespace, subparsers_action.dest, chosen_name)
+
+        return subparsers_action.choices[chosen_name]
+
+    @staticmethod
+    def _populate_namespace_defaults(namespace: Namespace, parser: ArgumentParser) -> None:
+        # add any action defaults that aren't present
+        for action in parser._actions:
+            if action.dest is not SUPPRESS:
+                if not hasattr(namespace, action.dest):
+                    if action.default is not SUPPRESS:
+                        setattr(namespace, action.dest, action.default)
+
+        # add any parser defaults that aren't present
+        for dest in parser._defaults:
+            if not hasattr(namespace, dest):
+                setattr(namespace, dest, parser._defaults[dest])
 
     def _cast_answer(self, question: Question, value: Any) -> Any:
         """Applies `question.cast` to `value`, re-prompting just this one

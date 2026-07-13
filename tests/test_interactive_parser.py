@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from interactive_argparse import InteractiveArgumentParser, PyInquirerPrompter, interactive, Prompter
+from interactive_argparse import InteractiveArgumentParser, PyInquirerPrompter, QuestionKind, interactive, Prompter
 from interactive_argparse.parse.interactive_parser import PROMPTER_ENV_VAR
 from helpers import FakePrompter
 
@@ -460,3 +460,99 @@ class TestPrompterExceptionHandling:
             iparser.parse_args([])
         stderr = capsys.readouterr().err
         assert "usage:" in stderr
+
+
+class _RecordingPrompter(FakePrompter):
+    """Like `FakePrompter`, but also records every `questions` list it was
+    called with (in order) - lets a test inspect what a specific round of a
+    multi-round subparser conversation actually asked, not just the final
+    answers.
+    """
+    def __init__(self, mapping):
+        super().__init__(mapping)
+        self.all_calls = []
+
+    def __call__(self, questions):
+        self.all_calls.append(questions)
+        return super().__call__(questions)
+
+
+class TestSubparsers:
+    def test_subcommand_arguments_are_prompted_for(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--name", default="bob")
+        subparsers = parser.add_subparsers(dest="command")
+        run_parser = subparsers.add_parser("run")
+        run_parser.add_argument("--speed", type=int, default=1)
+        subparsers.add_parser("stop")
+
+        prompter = FakePrompter({"name": "alice", "command": "run", "speed": "5"})
+        namespace = InteractiveArgumentParser(parser, prompter=prompter).parse_args([])
+
+        assert namespace.name == "alice"
+        assert namespace.command == "run"
+        assert namespace.speed == 5
+
+    def test_subcommand_choice_question_lists_all_registered_subcommands(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        run_parser = subparsers.add_parser("run")
+        run_parser.add_argument("--speed", type=int, default=1)
+        subparsers.add_parser("stop")
+
+        prompter = _RecordingPrompter({"command": "run", "speed": 3})
+        InteractiveArgumentParser(parser, prompter=prompter).parse_args([])
+
+        first_round_questions = prompter.all_calls[0]
+        command_question = next(q for q in first_round_questions if q.name == "command")
+        assert command_question.kind == QuestionKind.SINGLE_CHOICE
+        assert command_question.choices == ["run", "stop"]
+
+    def test_choosing_a_subcommand_without_arguments_does_not_prompt_again(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("run").add_argument("--speed", type=int, default=1)
+        subparsers.add_parser("stop")
+
+        prompter = FakePrompter({"command": "stop"})
+        namespace = InteractiveArgumentParser(parser, prompter=prompter).parse_args([])
+
+        assert namespace.command == "stop"
+        assert not hasattr(namespace, "speed")
+        assert prompter.call_count == 1
+
+    def test_subparsers_without_explicit_dest_do_not_pollute_the_namespace(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers()
+        subparsers.add_parser("run").add_argument("--speed", type=int, default=1)
+
+        prompter = FakePrompter({"_subcommand": "run", "speed": "9"})
+        namespace = InteractiveArgumentParser(parser, prompter=prompter).parse_args([])
+
+        assert namespace.speed == 9
+        assert not hasattr(namespace, "_subcommand")
+        assert not hasattr(namespace, "command")
+
+    def test_real_args_still_dispatch_to_subparser_non_interactively(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        run_parser = subparsers.add_parser("run")
+        run_parser.add_argument("--speed", type=int, default=1)
+
+        iparser = InteractiveArgumentParser(parser, prompter=FakePrompter({}))
+        namespace = iparser.parse_args(["--no_interactive", "run", "--speed", "7"])
+
+        assert namespace.command == "run"
+        assert namespace.speed == 7
+
+    def test_invalid_subcommand_answer_reports_usage_error_not_keyerror(self):
+        parser = argparse.ArgumentParser(prog="prog")
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("run")
+        subparsers.add_parser("stop")
+
+        # A misbehaving prompter returning a name that isn't actually
+        # registered must not raise a raw KeyError.
+        prompter = FakePrompter({"command": "does_not_exist"})
+        with pytest.raises(SystemExit):
+            InteractiveArgumentParser(parser, prompter=prompter).parse_args([])
