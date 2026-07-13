@@ -89,6 +89,16 @@ args = build_parser().parse_args()
 
 Bare `@interactive` (no arguments) keeps using the default `PyInquirerPrompter`, exactly as before. This only covers picking a *registered* prompter by name — for anything else (a custom `prompter` instance, `interactive_flag`, `enable_by_default`, ...) construct `InteractiveArgumentParser` directly instead.
 
+### Selecting the default prompter via an environment variable
+
+Scripts that construct `InteractiveArgumentParser` (or use bare `@interactive`) without an explicit `prompter=` normally always get `PyInquirerPrompter`. Setting the `INTERACTIVE_ARGPARSE_PROMPTER` environment variable overrides that default without touching the script's code — handy for e.g. using `WebPrompter` on your own machine while a CI/headless environment keeps the terminal prompter (or opts out entirely via `--no_interactive`):
+
+```shell script
+INTERACTIVE_ARGPARSE_PROMPTER=web python my_script.py
+```
+
+The value is looked up in `Prompter.registry` by name, same as `@interactive("name")`. An unset variable falls back to `PyInquirerPrompter`; a name that isn't registered raises a `ValueError` listing the registered prompters. An explicit `prompter=` argument (or a name passed to `@interactive(...)`) always takes precedence over the environment variable.
+
 ## Writing a custom prompter
 
 A prompter is any `Prompter` subclass that implements `__call__` and returns a `{argument_name: raw_answer}` dict:

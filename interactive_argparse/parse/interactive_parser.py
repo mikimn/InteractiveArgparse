@@ -1,4 +1,5 @@
 import functools
+import os
 import sys
 from argparse import ArgumentParser, Namespace, SUPPRESS
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -6,6 +7,21 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from .prompter import Prompter
 from .pyinquirer_prompter import PyInquirerPrompter
 from .question import Question, _argparse_action_to_question, not_none
+
+#: If set, `InteractiveArgumentParser`'s default prompter (used whenever no
+#: `prompter=` is passed explicitly) is looked up by this name in
+#: `Prompter.registry` instead of always being `PyInquirerPrompter`.
+PROMPTER_ENV_VAR = "INTERACTIVE_ARGPARSE_PROMPTER"
+
+
+def _resolve_prompter(name: str, source: str = "prompter") -> Prompter:
+    try:
+        prompter_cls = Prompter.registry[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown {source} {name!r}; registered prompters: {sorted(Prompter.registry)}"
+        )
+    return prompter_cls()
 
 
 class InteractiveArgumentParser:
@@ -32,7 +48,10 @@ class InteractiveArgumentParser:
 
     @staticmethod
     def _build_default_prompter() -> Prompter:
-        return PyInquirerPrompter()
+        prompter_name = (os.environ.get(PROMPTER_ENV_VAR) or "").strip()
+        if not prompter_name:
+            return PyInquirerPrompter()
+        return _resolve_prompter(prompter_name, source=f"{PROMPTER_ENV_VAR} value")
 
     # Proxy
     def __getattr__(self, attr):
@@ -152,16 +171,7 @@ def interactive(prompter: Union[Callable[..., ArgumentParser], str, None] = None
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            resolved_prompter = None
-            if isinstance(prompter, str):
-                try:
-                    prompter_cls = Prompter.registry[prompter]
-                except KeyError:
-                    raise ValueError(
-                        f"Unknown prompter {prompter!r}; registered prompters: "
-                        f"{sorted(Prompter.registry)}"
-                    )
-                resolved_prompter = prompter_cls()
+            resolved_prompter = _resolve_prompter(prompter) if isinstance(prompter, str) else None
             return InteractiveArgumentParser(fn(*args, **kwargs), prompter=resolved_prompter)
         return wrapper
 
