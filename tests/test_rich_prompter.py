@@ -1,3 +1,4 @@
+import pytest
 from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
 
 from interactive_argparse import QuestionKind
@@ -155,3 +156,49 @@ class TestRichPrompterCall:
         RichPrompter()([question])
         assert seen_prompts[0] == "Pick tags"
         assert "bogus" in seen_prompts[1]
+
+    def test_multi_choice_with_non_string_choices_does_not_loop_forever(self, monkeypatch):
+        # Regression test: question.choices preserves its original type
+        # (e.g. [1, 2, 3] for a type=int, nargs="+" argument), but the
+        # split answer from Prompt.ask is always a list of raw strings.
+        # Comparing "1" against the unstringified {1, 2, 3} never matches,
+        # so every answer looked invalid and the retry loop never
+        # terminated. A call-count guard turns that into a fast, bounded
+        # test failure instead of an actual hang.
+        call_count = {"n": 0}
+
+        def fake_ask(cls, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] > 10:
+                raise AssertionError("RichPrompter looped more than 10 times on valid input")
+            return "1 2"
+
+        monkeypatch.setattr(Prompt, "ask", classmethod(fake_ask))
+        question = Question(
+            name="tags", message="m", kind=QuestionKind.MULTI_CHOICE,
+            default=[], choices=[1, 2, 3],
+        )
+        answers = RichPrompter()([question])
+        assert answers == {"tags": ["1", "2"]}
+        assert call_count["n"] == 1
+
+    def test_multi_choice_exhausts_attempts_and_raises_when_always_invalid(self, monkeypatch):
+        # A genuinely-stuck validation (every answer invalid) must still
+        # terminate - bounded, with a clear error - rather than loop forever.
+        # The call-count guard is a safety net for this test itself: without
+        # a bounded retry fix, this would otherwise hang instead of failing.
+        call_count = {"n": 0}
+
+        def fake_ask(cls, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] > 10:
+                raise AssertionError("RichPrompter looped more than 10 times on invalid input")
+            return "bogus"
+
+        monkeypatch.setattr(Prompt, "ask", classmethod(fake_ask))
+        question = Question(
+            name="tags", message="m", kind=QuestionKind.MULTI_CHOICE,
+            default=[], choices=["a", "b"],
+        )
+        with pytest.raises(ValueError):
+            RichPrompter()([question])
