@@ -32,7 +32,7 @@ def build_parser():
 args = build_parser().parse_args()
 ```
 
-`rich.prompt` has no native multi-select control, so a `MULTI_CHOICE` question (e.g. `nargs="+"`) falls back to a free-text prompt, split on commas/whitespace into a list — values are still checked against `choices=` if the argument has any, with a re-prompt on an invalid entry.
+`rich.prompt` has no native multi-select control, so a `MULTI_CHOICE` question (e.g. `nargs="+"`) falls back to a free-text prompt, split on commas/whitespace into a list — values are still checked against `choices=` if the argument has any, with a re-prompt on an invalid entry (up to 3 attempts, then a clear error rather than prompting forever).
 
 See [`examples/rich_prompter.py`](../examples/rich_prompter.py) for a complete, runnable version of the example above.
 
