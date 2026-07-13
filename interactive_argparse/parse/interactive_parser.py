@@ -115,7 +115,7 @@ class InteractiveArgumentParser:
             if action.dest != self._flag_dest
         ]
         questions = list(filter(not_none, questions))
-        answers = self._prompter(questions)
+        answers = self._call_prompter(questions)
 
         if len(answers) == 0 and len(questions) > 0:
             # Cancelled by user
@@ -129,6 +129,21 @@ class InteractiveArgumentParser:
             setattr(namespace, key, value)
         self._namespace = Namespace(**namespace.__dict__.copy())
         return namespace, []
+
+    def _call_prompter(self, questions: List[Question]) -> Dict[str, Any]:
+        """Calls `self._prompter`, converting any `ValueError`/`TypeError`
+        it raises into a normal argparse usage error instead of letting it
+        crash the program with a raw traceback. Per the `Prompter`/
+        `Question` contract a prompter's `__call__` is only ever expected
+        to return raw answers, never raise - but a prompter with its own
+        internal validation (e.g. a bounded retry loop that gives up) doing
+        so anyway still deserves the same clean-error treatment as every
+        other exhausted-retry path in this class.
+        """
+        try:
+            return self._prompter(questions)
+        except (TypeError, ValueError) as exc:
+            self._base_parser.error(f"prompter error: {exc}")
 
 
 def interactive(prompter: Union[Callable[..., ArgumentParser], str, None] = None):

@@ -326,3 +326,59 @@ class TestDefaultPrompterEnvVar:
         fake = FakePrompter({})
         parser = InteractiveArgumentParser(argparse.ArgumentParser(), prompter=fake)
         assert parser._prompter is fake
+
+
+class _RaisingPrompter(Prompter):
+    """A prompter that fails its own internal validation and gives up -
+    e.g. a bounded-retry loop inside the prompter exhausting its attempts.
+    Per the Prompter/Question contract, a prompter's __call__ is only ever
+    expected to return raw answers, never raise - this simulates one that
+    does anyway, to verify InteractiveArgumentParser degrades that to a
+    normal usage error instead of a raw traceback.
+    """
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __call__(self, questions):
+        raise self.exc
+
+
+class TestPrompterExceptionHandling:
+    @staticmethod
+    def _build_parser(prompter):
+        parser = argparse.ArgumentParser(prog="prog")
+        parser.add_argument("--name")
+        return InteractiveArgumentParser(parser, prompter=prompter)
+
+    def test_value_error_from_prompter_reports_usage_error_not_a_raw_crash(self, capsys):
+        prompter = _RaisingPrompter(ValueError("could not satisfy validation"))
+        with pytest.raises(SystemExit):
+            self._build_parser(prompter).parse_args([])
+        stderr = capsys.readouterr().err
+        assert "usage:" in stderr
+
+    def test_type_error_from_prompter_reports_usage_error_not_a_raw_crash(self, capsys):
+        prompter = _RaisingPrompter(TypeError("bad prompter"))
+        with pytest.raises(SystemExit):
+            self._build_parser(prompter).parse_args([])
+        stderr = capsys.readouterr().err
+        assert "usage:" in stderr
+
+    def test_rich_prompter_exhausted_multi_choice_retries_reports_usage_error(self, monkeypatch, capsys):
+        # End-to-end: RichPrompter._ask_multi_choice raises ValueError once
+        # its bounded retries are exhausted (see test_rich_prompter.py) -
+        # verify that, wired through InteractiveArgumentParser for real,
+        # this surfaces as a clean usage error, not a raw traceback.
+        from rich.prompt import Prompt
+        from interactive_argparse.parse.rich_prompter import RichPrompter
+
+        monkeypatch.setattr(Prompt, "ask", classmethod(lambda cls, **kwargs: "bogus"))
+
+        parser = argparse.ArgumentParser(prog="prog")
+        parser.add_argument("--tags", nargs="+", choices=["a", "b"])
+        iparser = InteractiveArgumentParser(parser, prompter=RichPrompter())
+
+        with pytest.raises(SystemExit):
+            iparser.parse_args([])
+        stderr = capsys.readouterr().err
+        assert "usage:" in stderr
