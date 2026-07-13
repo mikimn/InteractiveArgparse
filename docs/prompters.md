@@ -124,3 +124,5 @@ Each `Question` describes one argument, independent of any particular UI:
 | `cast` | `Optional[Callable]` | Do **not** call this yourself — `InteractiveArgumentParser` applies it to whatever raw value your prompter returns, so every prompter gets correct type coercion for free. Just return the most natural value for your UI (e.g. a raw string from a text field). |
 
 Return raw answers — don't apply `cast` yourself, and don't worry about stringifying `default`/`choices` for display; format them however your UI needs.
+
+If your prompter does its own validation and gives up (e.g. a bounded retry loop, the way `RichPrompter` handles a `MULTI_CHOICE` question with a fixed set of `choices`), it's fine to raise a `ValueError` or `TypeError` instead of returning - `InteractiveArgumentParser` catches both and reports a normal argparse usage error, the same as any other unrecoverable answer.
